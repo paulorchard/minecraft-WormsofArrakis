@@ -41,10 +41,14 @@ final class TestCommand {
         root.then(branch("ring", 1, List.of(w("width"), new Arg("faces", IntegerArgumentType.integer(3, 600)))));
         root.then(branch("segment", 2, List.of(w("width"), new Arg("length", DoubleArgumentType.doubleArg(0.1, 64)),
                 new Arg("taper", DoubleArgumentType.doubleArg(0.05, 4)))));
+        root.then(branch("scale", 1, List.of(w("width"), new Arg("direction", StringArgumentType.word()), new Arg("mesh", StringArgumentType.word()))));
+        root.then(branch("scales", 1, List.of(w("width"), new Arg("count", IntegerArgumentType.integer(1, 200)),
+                new Arg("direction", StringArgumentType.word()), new Arg("mesh", StringArgumentType.word()))));
         root.then(branch("chain", 3, List.of(w("width"), new Arg("segments", IntegerArgumentType.integer(1, 400)),
                 new Arg("bend", DoubleArgumentType.doubleArg(-90, 90)), new Arg("pitch", DoubleArgumentType.doubleArg(-90, 90)),
                 new Arg("seglen", DoubleArgumentType.doubleArg(0.25, 64)), new Arg("closer", StringArgumentType.word()),
-                new Arg("taper", DoubleArgumentType.doubleArg(0.5, 1.5)))));
+                new Arg("taper", DoubleArgumentType.doubleArg(0.5, 1.5)), new Arg("per", IntegerArgumentType.integer(1, 16)),
+                new Arg("lip", DoubleArgumentType.doubleArg(0.0, 1.0)))));
         root.then(branch("wave", 2, List.of(w("width"), new Arg("segments", IntegerArgumentType.integer(1, 400)),
                 new Arg("amplitude", DoubleArgumentType.doubleArg(0, 45)), new Arg("seglen", DoubleArgumentType.doubleArg(0.25, 64)),
                 new Arg("closer", StringArgumentType.word()))));
@@ -108,6 +112,17 @@ final class TestCommand {
                 spec = WormSpec.of("ring", "-", width, faces);
                 reach = width / 2 + 6;
             }
+            case "scale", "scales" -> {
+                String dir = str(ctx, "direction", "tailward");
+                String mesh = str(ctx, "mesh", "cuboid");
+                if (!List.of("tailward", "headward").contains(dir) || !List.of("cuboid", "mesh").contains(mesh)) {
+                    ctx.getSource().sendFailure(Component.literal("direction: tailward|headward, mesh flag: cuboid|mesh"));
+                    return 0;
+                }
+                double count = kind.equals("scale") ? 1 : num(ctx, args, "count", 8);
+                spec = WormSpec.of(kind, dir, width, count, mesh.equals("mesh") ? 1 : 0);
+                reach = width / 2 + 6;
+            }
             case "segment" -> {
                 spec = WormSpec.of("segment", "-", width, num(ctx, args, "length", 2), num(ctx, args, "taper", 1));
                 reach = width / 2 + 6;
@@ -115,14 +130,19 @@ final class TestCommand {
             case "chain" -> {
                 double seglen = num(ctx, args, "seglen", 2);
                 int segs = (int) num(ctx, args, "segments", 12);
-                spec = WormSpec.of("chain", str(ctx, "closer", "lip"), width, segs, num(ctx, args, "bend", 0),
-                        num(ctx, args, "pitch", 0), seglen, num(ctx, args, "taper", 1));
+                String closer = str(ctx, "closer", "lip");
+                double per = num(ctx, args, "per", 1);
+                if (closer.equals("scale")) seglen = per;
+                spec = WormSpec.of("chain", closer, width, segs, num(ctx, args, "bend", 0),
+                        num(ctx, args, "pitch", 0), seglen, num(ctx, args, "taper", 1), per, num(ctx, args, "lip", 0.132));
                 reach = width / 2 + 6;
             }
             case "wave" -> {
                 double seglen = num(ctx, args, "seglen", 2);
                 int segs = (int) num(ctx, args, "segments", 12);
-                spec = WormSpec.of("wave", str(ctx, "closer", "lip"), width, segs, num(ctx, args, "amplitude", 8), 0, seglen, 1);
+                String closer = str(ctx, "closer", "lip");
+                if (closer.equals("scale")) seglen = 1;
+                spec = WormSpec.of("wave", closer, width, segs, num(ctx, args, "amplitude", 8), 0, seglen, 1, 1, 0.132);
                 reach = width / 2 + 6;
             }
             case "mouth" -> {

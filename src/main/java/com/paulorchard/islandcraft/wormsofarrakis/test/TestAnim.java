@@ -31,6 +31,7 @@ public final class TestAnim {
     public static double reach(WormSpec s, double circumradius) {
         return switch (s.kind()) {
             case "chain", "wave" -> s.p(1, 12) * s.p(4, 2) + 2 * circumradius + 2;
+            case "scale", "scales" -> s.p(1, 8) + 2 * circumradius + 4;
             case "segment" -> s.p(1, 2) + 2 * circumradius + 2;
             default -> 2 * circumradius + 4;
         };

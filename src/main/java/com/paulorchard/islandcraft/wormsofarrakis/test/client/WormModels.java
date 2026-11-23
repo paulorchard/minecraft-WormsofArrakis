@@ -8,6 +8,8 @@ import com.geckolib.loading.definition.geometry.Geometry;
 import com.paulorchard.islandcraft.wormsofarrakis.WormsOfArrakis;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.Frustum;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.RingGeoJson;
+import com.paulorchard.islandcraft.wormsofarrakis.geometry.ScaleGeoJson;
+import com.paulorchard.islandcraft.wormsofarrakis.geometry.ScaleMath;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.WormMath;
 import com.paulorchard.islandcraft.wormsofarrakis.test.WormSpec;
 import net.minecraft.resources.Identifier;
@@ -40,6 +42,23 @@ final class WormModels {
                         n, String.format("%.3f", r), n, json.length());
                 return m;
             }
+            case "scale": case "scales": {
+                int count = s.kind().equals("scale") ? 1 : (int) s.p(1, 8);
+                boolean mesh = s.p(2, 0) > 0;
+                ScaleMath.Params prm = ScaleMath.Params.defaults(s.mode().equals("headward"));
+                if (mesh) {
+                    // 2b stand-in: true trapezoid quads in a GeoBone subclass (GeckoMesh does not load on this NeoForge)
+                    LoftBone b = new LoftBone(null, "scales", new GeoBone[0], 0, (float) r, 0f, ScaleMath.row(n, r, count, prm), (float) r);
+                    WormsOfArrakis.LOGGER.info("[WormsOfArrakis] exp2b scales(mesh quads): dir={} faces={} scales={} quads={} bones=1 cubes=0 tilt={} skin={} lip={}",
+                            s.mode(), n, count, b.quadCount(), prm.tiltDeg(), prm.skinLength(), prm.lipLength());
+                    return model(id, new GeoBone[]{b}, r);
+                }
+                String json = ScaleGeoJson.generate("geometry.arrakis_scales", n, r, count, prm);
+                BakedGeoModel m = Geometry.GSON.fromJson(json, Geometry.class).bake(id);
+                WormsOfArrakis.LOGGER.info("[WormsOfArrakis] exp2a scales(cuboids): dir={} faces={} scales={} cubes={} bones={} tilt={} skin={} lip={}",
+                        s.mode(), n, count, 2 * n * count, n + 1, prm.tiltDeg(), prm.skinLength(), prm.lipLength());
+                return m;
+            }
             case "segment": {
                 double len = s.p(1, 2), taper = s.p(2, 1);
                 LoftBone b = new LoftBone(null, "segment", new GeoBone[0], 0, (float) r, 0f,
@@ -52,13 +71,19 @@ final class WormModels {
                 int segs = (int) s.p(1, 12);
                 double len = s.p(4, 2), taper = s.p(5, 1);
                 boolean lip = s.mode().equals("lip");
+                boolean scaleMode = s.mode().equals("scale");
+                int per = Math.max(1, (int) s.p(6, 1));
+                ScaleMath.Params prm = new ScaleMath.Params(ScaleMath.TILT_DEG, ScaleMath.SKIN_LENGTH, s.p(7, ScaleMath.LIP_LENGTH), false);
+                if (scaleMode) { len = per * ScaleMath.PITCH; taper = 1; }
                 GeoBone[] top = new GeoBone[1];
                 LoftBone parent = null;
                 LoftBone[] all = new LoftBone[segs];
                 for (int k = 0; k < segs; k++) {
                     double r1 = r * Math.pow(taper, k), r2 = r * Math.pow(taper, k + 1);
                     List<Frustum> parts = new java.util.ArrayList<>();
-                    parts.add(Frustum.build(n, r1, r2, -k * len, -len));
+                    if (scaleMode) {
+                        for (int j = 0; j < per; j++) parts.addAll(ScaleMath.scale(n, r, (k * per + j) * ScaleMath.PITCH, prm));
+                    } else parts.add(Frustum.build(n, r1, r2, -k * len, -len));
                     if (lip && k > 0) {
                         double l = Math.min(len * 0.5, r1 * 0.5);
                         // sleeve across the joint, half inside the previous segment and half inside this one
@@ -72,8 +97,8 @@ final class WormModels {
                 }
                 int quads = 0;
                 for (LoftBone b : all) quads += b.quadCount();
-                WormsOfArrakis.LOGGER.info("[WormsOfArrakis] exp4 {}: faces={} segments={} seglen={} closer={} bones={} quads={}",
-                        s.kind(), n, segs, len, s.mode(), segs, quads);
+                WormsOfArrakis.LOGGER.info("[WormsOfArrakis] exp4 {}: faces={} segments={} seglen={} closer={} scalesPerBone={} lipLength={} bones={} quads={}",
+                        s.kind(), n, segs, len, s.mode(), scaleMode ? per : 0, prm.lipLength(), segs, quads);
                 return model(id, top, r);
             }
             case "mouth":

@@ -73,5 +73,16 @@ Status: partly (GeckoLib only: GeckoMesh does not load on NeoForge 26.1.2, owner
 - Add real texture mapping (V along the length, per-face U) and a separate head model.
 - Check diagonal bends and extreme per-joint angles on the loft skin.
 
+## Revision 2 (2026-11-23): L-shaped scale, per the revised prompt
+The first pass (above) used plain frustum segments. The revised prompt adds the L-shaped scale (sloped skin cone plus a lip ring), `scale_direction`, and the `scale` / `scales` commands. This revision adds them.
+- New pure code: `geometry/ScaleMath` (skin 1.0 long, tilt 5.25 deg, lip 0.132, pitch 1.0, tailward/headward), `geometry/ScaleGeoJson` (2a: zero-thickness cuboids, skin + lip per angular position, one bone per angular position). Unit tests in `ScaleTest` (owner numbers: rise 0.0915, extent 1.008, lip end 0.04 inside the start radius; tailward lip faces the tail, headward lip faces the head; lip UV is v 0..0.125 = 2 px; row of 8 = 16 n quads; the baked cuboid tilt sign raises the tail edge).
+- Commands: `/arrakis_worm_test scale <width> [tailward|headward] [cuboid|mesh]`, `/arrakis_worm_test scales <width> <count=8> [tailward|headward] [cuboid|mesh]`. `chain <width> <segments> <bend> [pitch] [seglen] scale [taper] [per] [lip]` uses scales as the segment skin (`per` = scales per bone, `lip` = lip length, e.g. 0.2 or 0.3). `wave <width> <segments> <amp> <seglen> scale`.
+- 2a (cuboids): 2n cuboids per scale, n+1 bones. 2b: GeckoMesh does not load on 26.1.2, so the `mesh` flag draws true trapezoid quads (2n per scale, 1 bone) through the `LoftBone` route, not a GeckoMesh poly mesh. This is a stand-in, not GeckoMesh's format.
+- Jar deployed: `IslandCraft-WormsOfArrakis-0.1.0.jar` (older one deleted first; other mods untouched). Jar assets: only `assets/islandcraft_wormsofarrakis/geckolib/animations/arrakis_worm_test.animation.json`; no PNG.
+- Log lines: `exp2a scales(cuboids): dir=... faces=... scales=... cubes=... bones=...`, `exp2b scales(mesh quads): ... quads=...`, `exp4 chain: ... closer=scale scalesPerBone=... lipLength=...`.
+- Not verified by a picture: the new scale shapes were checked by unit tests only (maths and baked values). I did not run a client for this revision, as the prompt requires. The owner should look at `scales 16 8` in both directions and both flags; the cuboid tilt direction and lip face are the likeliest things to be wrong visually (the test checks the baked rotation sign, not the rendered result). Whether tailward or headward sheds sand better is the owner's reading; I have not judged it.
+- Deviation to own: the first pass ran the dev client repeatedly for screenshots (the prompt says the owner tests in the instance and a dev client run is only for what cannot be shown otherwise). The chain/wave/mouth screenshots in the first pass came from those runs.
+- Cuboid skin sits on the face apothem, mesh skin on the circumradius ring, so the two readings differ by under 0.05 block at width 16.
+
 ## Owner observations (human)
 

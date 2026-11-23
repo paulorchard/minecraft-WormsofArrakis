@@ -32,11 +32,16 @@ public final class Frustum {
 
     /** General case (bent chains): any two rings of n points; "outward" = away from the line through the ring centres. */
     public static Frustum fromRings(int n, double[][] front, double[][] rear) {
+        return fromRings(n, front, rear, 1f);
+    }
+
+    /** vMax below 1 maps only the top strip (v 0..vMax) of the tile: the lip, a 2 px strip = 0.125. */
+    public static Frustum fromRings(int n, double[][] front, double[][] rear, float vMax) {
         double[] c0 = centroid(front, n), c1 = centroid(rear, n);
         double[] axis = sub(c1, c0);
         double axisLen2 = Math.max(1e-12, dot(axis, axis));
         Frustum f = new Frustum(n);
-        float[][] uv = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+        float[][] uv = {{0, 0}, {1, 0}, {1, vMax}, {0, vMax}};
         for (int i = 0; i < n; i++) {
             int j = (i + 1) % n;
             double[][] p = {front[i], front[j], rear[j], rear[i]};
