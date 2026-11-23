@@ -103,10 +103,17 @@ public final class WormPose {
         return 0.5 * (joints[k][1] + joints[k + 1][1]);
     }
 
-    /** Number of segments whose centre is above the surface (plane at height 0), counting from the head base. */
+    /** Number of segments (head ring included) whose centre is above the surface (plane at height 0). */
     public int exposed(double surface) {
         int n = 0;
         for (int k = 0; k < segments; k++) if (centreY(k) > surface) n++;
+        return n;
+    }
+
+    /** Body rings above the surface: every segment except the head ring (segment 0), which is counted separately. */
+    public int exposedBody(double surface) {
+        int n = 0;
+        for (int k = 1; k < segments; k++) if (centreY(k) > surface) n++;
         return n;
     }
 

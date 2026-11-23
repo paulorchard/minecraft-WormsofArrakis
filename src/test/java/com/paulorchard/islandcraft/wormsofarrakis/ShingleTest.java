@@ -36,7 +36,9 @@ class ShingleTest {
             assertEquals(ScaleMath.LIP_LENGTH, res.lip[j][i], 1e-12);
         }
         assertEquals(0, res.cutVertices);
-        assertEquals(0.25, res.linerInsetUsed, 1e-12, "default inset is enough for the base lip (reach 0.04 + rim)");
+        System.out.printf("[liner] straight chain width 16 (n=50): inset %.4f (min %.4f), deepest plate edge radius %.4f%n", res.linerInsetUsed, res.linerInsetMin, res.minPlateRadius);
+        assertTrue(res.linerInsetUsed > 0.05 && res.linerInsetUsed < 0.2, "tight liner: " + res.linerInsetUsed);
+        assertEquals(r - res.minPlateRadius + ShingleMath.LINER_MARGIN, res.linerInsetUsed, 1e-9);
     }
 
     @Test void pureYawAndPitchGapIsRTanOutsideAndNegativeInside() {
@@ -91,8 +93,7 @@ class ShingleTest {
                     assertTrue(lip >= ShingleMath.MIN_LIP - 1e-12);
                 }
                 // liner inside the plates, with margin
-                assertTrue(r - res.linerInsetUsed <= res.minPlateRadius - ShingleMath.LINER_MARGIN + 1e-9, "liner pokes out at width " + width + " rw " + rw);
-                assertTrue(res.linerInsetUsed >= ShingleMath.LINER_INSET);
+                for (int k = 0; k < 8; k++) assertTrue(Math.max(res.linerRadius[k], res.linerRadius[k + 1]) <= res.deepest[k] - ShingleMath.LINER_MARGIN + 1e-9, "liner pokes out at width " + width + " rw " + rw + " ring " + k);
                 System.out.printf("[shingle] %5d %11.1f %8.2f %7.3f %7.3f %7.3f %8d %8d %8d %9.3f%n", width, rw, Math.toDegrees(1.0 / (rw * width)),
                         res.maxGap, res.minGap, lipMax, res.uncovered, res.cutVertices, res.uncutIntersections, res.linerInsetUsed);
             }
@@ -105,7 +106,7 @@ class ShingleTest {
             for (double deg : new double[]{0, 2, 5, 10, 20}) for (double[] share : new double[][]{{1, 0}, {0, 1}, {0.7071, 0.7071}}) for (int per : new int[]{1, 4}) {
                 ChainMath c = chain(8, per, r, deg * share[0], deg * share[1]);
                 ShingleMath.Result res = ShingleMath.build(c, n, r, per, opts(true));
-                assertTrue(r - res.linerInsetUsed < res.minPlateRadius, "width " + width + " deg " + deg);
+                for (int k = 0; k < 8; k++) assertTrue(Math.max(res.linerRadius[k], res.linerRadius[k + 1]) < res.deepest[k], "width " + width + " deg " + deg + " ring " + k);
             }
         }
     }

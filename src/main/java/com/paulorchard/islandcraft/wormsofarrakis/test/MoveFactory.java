@@ -35,7 +35,10 @@ public final class MoveFactory {
         int segs = (int) s.p(1, 60);
         boolean force = s.p(10, 0) > 0;
         return switch (s.mode()) {
-            case "crest" -> Moves.crest(width, segs, s.p(2, 0.4), s.p(4, 8), 1.0, force);
+            case "crest" -> {
+                double up = s.p(3, 6);
+                yield Moves.crest(width, segs, s.p(2, 0.4), up, s.p(6, 0) > 0 ? s.p(6, 0) : up, s.p(4, 12), force);
+            }
             case "emerge" -> Moves.emerge(width, segs, (int) s.p(2, 10), s.p(3, 90), s.p(4, 12), s.p(5, 2), s.p(14, 1.0), force);
             case "crash" -> Moves.crash(width, segs, (int) s.p(2, 10), s.p(3, 70), s.p(4, 12), s.p(6, 12), s.p(7, 4), s.p(15, 1.0), s.p(14, 1.0),
                     s.p(9, 1) > 0, force);
@@ -46,7 +49,7 @@ public final class MoveFactory {
     /** Move for a spec, cached by everything except the time fields. */
     public static synchronized Moves.Move get(WormSpec s) {
         double[] q = s.p().clone();
-        for (int i : new int[]{8, 11, 12, 13, 16}) if (i < q.length) q[i] = 0;
+        for (int i : new int[]{8, 11, 12, 13, 16, 17}) if (i < q.length) q[i] = 0;
         String key = new WormSpec(s.kind(), s.mode(), q).serialize();
         Moves.Move m = CACHE.get(key);
         if (m == null) {
@@ -59,6 +62,8 @@ public final class MoveFactory {
 
     /** Script time in seconds for an entity of the given age (ticks, with partial tick). */
     public static double tau(WormSpec s, double age) {
+        double fz = s.p(17, -1);
+        if (fz >= 0) return get(s).tauAt(fz);
         return s.p(13, 0) + s.p(11, 1) * (age - s.p(12, 0)) / 20.0;
     }
 

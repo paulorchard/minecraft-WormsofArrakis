@@ -4,8 +4,21 @@ package com.paulorchard.islandcraft.wormsofarrakis.test;
 public final class TestFlags {
     /** /arrakis_worm_test stats on|off */
     public static volatile boolean stats;
-    /** /arrakis_worm_test surface plane|world: plane = the entity height, world = the client level height map. */
+    /** /arrakis_worm_test surface plane|world: plane = flat at the base level (default), world = the client level height map. */
     public static volatile boolean worldSurface;
+    /** Stagger: fraction of a face the rings are rotated by (0 = off). */
+    public static volatile double stagger = 1.0;
+    /** Seed of the variety; negative = take the entity id. */
+    public static volatile long seed = -1L;
+    /** Brightness jitter, 0..0.1. */
+    public static volatile double jitter = 0.04;
+    /** Seeded tile orientation per face. */
+    public static volatile boolean tiles = true;
 
     private TestFlags() {}
+
+    /** Part of the geometry cache keys: changes whenever a visual switch changes. */
+    public static String visualKey() {
+        return stagger + "/" + seed + "/" + jitter + "/" + tiles + "/" + worldSurface;
+    }
 }

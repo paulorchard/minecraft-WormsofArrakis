@@ -23,7 +23,7 @@ class PathTest {
 
     private static Moves.Move[] sampleMoves(double w) {
         return new Moves.Move[]{
-                Moves.crest(w, 60, 0.4, 8, 1.0, false),
+                Moves.crest(w, 60, 0.4, 6, 6, 12, false),
                 Moves.emerge(w, 60, 10, 90, 12, 2, 1.0, false),
                 Moves.emerge(w, 60, 10, 60, 12, 2, 1.0, false),
                 Moves.crash(w, 400, 10, 70, 12, 12, 4, 1.0, 1.0, true, false)};
@@ -66,38 +66,71 @@ class PathTest {
         }
     }
 
-    @Test void crestTopOfTheHumpIsCrestFractionOfTheWidth() {
-        System.out.println("[path] crest: width fraction  measuredTop  expected  archRadius  span(blocks)  headTopAtPeak");
-        for (double w : new double[]{3, 16, 48}) for (double frac : new double[]{0.4, 0.5}) {
-            Moves.Move m = Moves.crest(w, 60, frac, 8, 1.0, false);
-            int n = WormMath.faceCount(w);
-            double top = -1e9;
-            double step = w > 20 ? 3 : 1;
-            for (double s = m.s0; s <= m.sEnd; s += step) {
-                WormSkin k = WormSkin.build(m.pose(s), n, m.r0, SurfaceProvider.PLANE, ShingleMath.Options.defaults(0.132, true));
-                top = Math.max(top, maxY(k.result));
-            }
-            assertEquals(frac * w, top, 0.06, "hump top at width " + w + " fraction " + frac);
-            double peakHead = -1e9;
-            double tipOver = 0;
-            for (double s = m.s0; s <= m.sEnd; s += 0.5) {
-                double[] bp = m.path.pos(s);
-                double sf = WormPose.ahead(m.path, s, new double[]{0, bp[1], bp[0]}, HeadSpec.headLength(w));
-                peakHead = Math.max(peakHead, m.headHeights(s)[1]);   // the tip of the head (flaps included) lies on the path
-                tipOver = Math.max(tipOver, m.headHeights(s)[1] - m.path.pos(sf)[1]);
-            }
-            assertTrue(tipOver < 1e-6, "head tip is on the path, never above it");
-            // span between the two surface crossings of the path
-            double a = Double.NaN, b = Double.NaN;
-            for (double s = m.s0; s < m.sEnd; s += 0.01) {
-                double y0 = m.path.pos(s)[1] + m.r0, y1 = m.path.pos(s + 0.01)[1] + m.r0;
-                if (y0 < 0 && y1 >= 0 && Double.isNaN(a)) a = m.path.pos(s)[0];
-                if (y0 >= 0 && y1 < 0) b = m.path.pos(s)[0];
-            }
-            System.out.printf("[path] crest: %5.0f %4.1f %10.3f %9.3f %8.1f %12.1f %12.3f%n", w, frac, top, frac * w, m.topRadius, b - a, peakHead + m.r0);
-            assertTrue(peakHead + m.r0 <= frac * w + 0.2, "head at the peak obeys the same limit");
+    /** Distance from the head tip (the closed flap apex) to the path. */
+    private static double tipToPath(Moves.Move m, double s) {
+        double[] tp = m.tip(s);
+        double best = 1e9;
+        for (double a = s - 2; a <= s + HeadSpec.headLength(m.width) + 3; a += 0.05) {
+            double[] q = m.path.pos(a);
+            best = Math.min(best, Math.hypot(q[0] - tp[0], q[1] - tp[1]));
         }
-        assertThrows(Moves.Rejected.class, () -> Moves.crest(16, 60, 0.6, 8, 1.0, false));
+        return best;
+    }
+
+    @Test void crestApexTopEqualsHeightTimesWidth() {
+        System.out.println("[path] crest apex: width height radius -> apexTop(path) measuredTop(plates) entry exit span exposedLength");
+        double[] heights = {0.2, 0.4, 0.8, 1.3, 2.0, 3.0};
+        for (double w : new double[]{3, 16, 48}) for (double radius : new double[]{6, 2}) for (double h : heights) {
+            Moves.Move m = Moves.crest(w, 60, h, radius, radius, 12, false);
+            double rise = Math.sin(Math.toRadians(com.paulorchard.islandcraft.wormsofarrakis.geometry.ScaleMath.TILT_DEG)) * com.paulorchard.islandcraft.wormsofarrakis.geometry.ScaleMath.SKIN_LENGTH;
+            double pathTop = m.maxPathHeight() + m.r0 + rise;
+            assertEquals(h * w, pathTop, 0.06, "path apex top, width " + w + " height " + h + " radius " + radius);
+            double measured = Double.NaN;
+            if (w < 20 && radius == 6) {
+                int n = WormMath.faceCount(w);
+                double top = -1e9, step = w < 5 ? 0.5 : 1.0;
+                for (double s = m.s0; s <= m.sEnd; s += step) {
+                    WormSkin k = WormSkin.build(m.pose(s), n, m.r0, SurfaceProvider.PLANE, ShingleMath.Options.defaults(0.132, true));
+                    top = Math.max(top, maxY(k.result));
+                }
+                measured = top;
+                assertEquals(h * w, top, 0.06, "plate top, width " + w + " height " + h);
+            }
+            System.out.printf("[path] crest apex: %4.0f %4.1f %3.0f -> %.3f %.3f entry=%.1f exit=%.1f span=%.1f exposedLength=%.1f%n", w, h, radius, pathTop, measured, m.entryAngle, m.exitAngle, m.span(), m.exposedLength);
+            double maxTip = 0;
+            for (double s = m.s0; s <= m.sEnd; s += 0.5) maxTip = Math.max(maxTip, tipToPath(m, s));
+            assertTrue(maxTip <= 0.05 * w + 0.1, "head tip is on the path within " + (0.05 * w + 0.1) + ", measured " + maxTip + " (width " + w + " height " + h + " radius " + radius + ")");
+        }
+        assertThrows(Moves.Rejected.class, () -> Moves.crest(16, 60, 3.2, 6, 6, 12, false));
+        assertThrows(Moves.Rejected.class, () -> Moves.crest(16, 60, 0, 6, 6, 12, false));
+    }
+
+    @Test void crestAsymmetricRadiiGiveDifferentAnglesAndTheRadiusIsClamped() {
+        Moves.Move m = Moves.crest(16, 80, 1.3, 6, 3, 12, false);
+        System.out.printf("[path] crest asymmetric 1.3 radius 6 / 3: entry=%.1f exit=%.1f%n", m.entryAngle, m.exitAngle);
+        assertTrue(m.exitAngle > m.entryAngle + 3, "a tighter descent is steeper: entry " + m.entryAngle + " exit " + m.exitAngle);
+        Moves.Move sym = Moves.crest(16, 80, 1.3, 6, 6, 12, false);
+        assertEquals(sym.entryAngle, sym.exitAngle, 0.5);
+        for (double rd : new double[]{2, 3, 4, 6}) {
+            Moves.Move a = Moves.crest(16, 80, 1.3, 6, rd, 12, false);
+            System.out.printf("[path] crest 16 80 height=1.3 radius=6 radius_down=%.0f: entry=%.1f exit=%.1f span=%.1f W exposedLength=%.1f W%n", rd, a.entryAngle, a.exitAngle, a.span() / 16, a.exposedLength / 16);
+        }
+        Moves.Move clamped = Moves.crest(16, 80, 0.4, 1.0, 1.0, 12, false);
+        assertEquals(BendLimit.MIN_BEND_RADIUS_WIDTHS * 16, clamped.topRadius, 1e-9);
+        assertFalse(clamped.note.isEmpty());
+        Moves.Move forced = Moves.crest(16, 80, 0.4, 1.0, 1.0, 12, true);
+        assertEquals(16.0, forced.topRadius, 1e-9);
+        // the reference diagram: 16 80 height 1.3 radius 6 is about 8 widths long and the head re-enters at about 30 degrees
+        System.out.printf("[path] crest 16 80 1.3 radius 6: exposedLength=%.1f (%.1f W) span=%.1f (%.1f W) entry=%.1f exit=%.1f%n", sym.exposedLength, sym.exposedLength / 16, sym.span(), sym.span() / 16, sym.entryAngle, sym.exitAngle);
+    }
+
+    @Test void frameTableIsMonotoneInTime() {
+        Moves.Move m = Moves.crash(16, 150, 25, 70, 12, 12, 4, 1.0, 1.0, true, true);
+        for (int i = 0; i <= 3; i++) System.out.println("[path] crash 16 150 25 " + m.frame(i / 3.0).line());
+        Moves.Move.Frame f0 = m.frame(0);
+        assertEquals(0, f0.dxW(), 1e-9);
+        assertTrue(m.frame(0.5).tipHeightW() > f0.tipHeightW());
+        assertTrue(m.frame(1).dxW() > m.frame(0.5).dxW());
     }
 
     @Test void visibleJointsNeverExceedTheLimit() {
@@ -152,7 +185,7 @@ class PathTest {
         for (double w : new double[]{3, 16, 48}) for (int n = 1; n <= 40; n++) {
             Moves.Move m = Moves.emerge(w, n + 12, n, 90, 12, 2, 1.0, false);
             WormPose p = m.pose(m.sHold);
-            assertEquals(n, p.exposed(0), "width " + w + " n " + n);
+            assertEquals(n, p.exposedBody(0), "width " + w + " n " + n);
             double[] h = m.headHeights(m.sHold);
             assertTrue(Math.abs(h[0] - n) <= 1.0, "base height " + h[0] + " vs n " + n);
         }
@@ -160,7 +193,9 @@ class PathTest {
             Moves.Move m = Moves.emerge(16, 40, 10, angle, 12, 2, 1.0, false);
             double[] h = m.headHeights(m.sHold);
             System.out.printf("[path] emerge: 16 %4.0f 10 -> base %.2f  top %.2f  headLength %.2f  (n=10, n*sin(angle)=%.2f)%n", angle, h[0], h[1], HeadSpec.headLength(16), 10 * Math.sin(Math.toRadians(angle)));
-            assertEquals(10, m.pose(m.sHold).exposed(0));
+            assertEquals(10, m.pose(m.sHold).exposedBody(0));
+            assertEquals(10 * Math.sin(Math.toRadians(angle)), h[0], 1.0);
+            assertEquals(h[0] + HeadSpec.headLength(16) * Math.sin(Math.toRadians(angle)), h[1], 0.5 + 0.03 * 16);
         }
     }
 

@@ -1,19 +1,19 @@
 package com.paulorchard.islandcraft.wormsofarrakis.path;
 
+import com.paulorchard.islandcraft.wormsofarrakis.geometry.ScaleMath;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.WormMath;
 
 /**
- * The head assembly (mouth), kept in one place so the mouth rework only has to change this:
- * BODY_LENGTH = the rigid body part of the head (4 body segments of 2 blocks), plus the folded flaps which stick out
- * CONE_HEIGHT x ring radius in front of it. headLength(width) = BODY_LENGTH + CONE_HEIGHT x R.
+ * The head, kept in one place. Since prompt 04 the head is the lead ring of the chain (segment 0, built exactly like every
+ * other ring) with three flaps hinged on its front edge. HEAD_LENGTH = pitch (the head ring) + CONE_HEIGHT x R (the closed
+ * flaps), measured from the rear of the head ring to the flap tip.
  */
 public final class HeadSpec {
-    public static final int BODY_SEGMENTS = 4;
-    public static final double BODY_SEGMENT_LENGTH = 2.0;
-    /** Rigid length of the head body in blocks (the named HEAD_LENGTH of the prompt, without the flaps). */
-    public static final double BODY_LENGTH = BODY_SEGMENTS * BODY_SEGMENT_LENGTH;
     /** Closed flap cone height as a fraction of the ring radius. */
     public static final double CONE_HEIGHT = 0.6;
+    /** Default opening angle of the flaps (degrees), the same as the prompt 01 mouth_open animation. */
+    public static final double OPEN_DEGREES = 70.0;
+    public static final int FLAPS = 3;
 
     private HeadSpec() {}
 
@@ -21,8 +21,13 @@ public final class HeadSpec {
         return WormMath.circumradius(WormMath.faceCount(width), WormMath.FACE_WIDTH);
     }
 
-    /** Whole head length: body plus the closed flaps. */
+    /** Height of the closed flap cone in front of the head ring's front edge. */
+    public static double coneHeight(double width) {
+        return CONE_HEIGHT * ringRadius(width);
+    }
+
+    /** HEAD_LENGTH: the head ring plus the closed flaps. */
     public static double headLength(double width) {
-        return BODY_LENGTH + CONE_HEIGHT * ringRadius(width);
+        return ScaleMath.PITCH + coneHeight(width);
     }
 }

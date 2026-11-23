@@ -88,24 +88,14 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
     public void adjustRenderPose(RenderPassInfo<EntityRenderState> info) {
         // plain Entity has no body rotation of its own: rotate the model so model -Z (head side) is the entity's forward
         info.poseStack().mulPose(Axis.YP.rotationDegrees(-info.renderState().getGeckolibData(YAW)));
-        if (headValid) {
-            // head assembly of a move: its rear end sits on joint 0, its axis along the chord to the path point headLength ahead
-            info.poseStack().translate(0.0, headY, headZ);
-            info.poseStack().mulPose(Axis.XP.rotation((float) headPhi));
-            info.poseStack().translate(0.0, -headRing, HeadSpec.BODY_LENGTH);
-        }
     }
 
-    // ---- head-leading moves (prompt 03) ----
-
-    private boolean headValid;
-    private double headY, headZ, headPhi, headRing;
+    // ---- head-leading moves (prompts 03 and 04): the head is the lead ring of the chain, drawn with the skin ----
 
     private static final class MoveCache {
         String key;
         double s = Double.NaN;
         WormSkin skin;
-        double headY, headZ, headPhi;
         int exposed;
         double[] heights;
     }
@@ -114,6 +104,15 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
     private static final Map<Integer, Boolean> HOLD_LOGGED = new HashMap<>();
     private static final Map<Long, Double> COLUMN_CACHE = new HashMap<>();
     private static String LAST_MOVE_LOG = "";
+
+    /** The seed of the variety: the command's seed, or the entity id. */
+    private static long seedFor(int entityId) {
+        return TestFlags.seed >= 0 ? TestFlags.seed : entityId;
+    }
+
+    private static ShingleMath.Options visual(ShingleMath.Options base, int entityId) {
+        return base.withVariety(TestFlags.stagger, seedFor(entityId), TestFlags.tiles, TestFlags.jitter);
+    }
 
     private static SurfaceProvider surfaceFor(EntityRenderState state) {
         if (!TestFlags.worldSurface) return SurfaceProvider.PLANE;
@@ -133,7 +132,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
         };
     }
 
-    /** Head-leading move: the body is drawn only for the segments above the sand (plus one neighbour each side). */
+    /** Head-leading move: the skin is drawn only for the segments above the base level (plus one neighbour each side); segment 0 is the head ring and carries the flaps. */
     private void submitMove(WormSpec spec, EntityRenderState state, PoseStack poseStack, SubmitNodeCollector collector, CameraRenderState camera) {
         Moves.Move m = MoveFactory.get(spec);
         double age = state.getGeckolibData(AGE);
@@ -143,7 +142,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
         double linerMode = spec.p(16, 1);
         Integer id = state.getGeckolibData(ID);
         MoveCache c = MOVE_CACHE.get(id);
-        String key = spec.serialize();
+        String key = spec.serialize() + "|" + TestFlags.visualKey();
         boolean rebuild = c == null || c.s != s || !key.equals(c.key) || TestFlags.worldSurface;
         long t0 = System.nanoTime();
         if (rebuild) {
@@ -151,24 +150,21 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
             c.key = key;
             c.s = s;
             WormPose pose = m.pose(s);
-            c.skin = WormSkin.build(pose, n, m.r0, surfaceFor(state), ShingleMath.Options.defaults(ScaleMath.LIP_LENGTH, linerMode > 0));
-            double[] b = m.path.pos(s);
-            double sf = WormPose.ahead(m.path, s, new double[]{0, b[1], b[0]}, HeadSpec.headLength(m.width));
-            double[] f = m.path.pos(sf);
-            c.headY = b[1];
-            c.headZ = b[0];
-            c.headPhi = Math.atan2(b[1] - f[1], -(b[0] - f[0]));   // elevation of the head-to-tail axis (tail = from the front point back to joint 0)
-            c.exposed = pose.exposed(0);
+            ShingleMath.Options opt = visual(ShingleMath.Options.defaults(ScaleMath.LIP_LENGTH, linerMode > 0), id)
+                    .withLinerColor(linerMode >= 1.5 ? ShingleMath.LINER_DARK : ShingleMath.LINER_TINT);
+            c.skin = WormSkin.build(pose, n, m.r0, surfaceFor(state), opt, spec.p(8, 0) > 0 ? HeadSpec.OPEN_DEGREES : 0.0);
+            c.exposed = pose.exposedBody(0);
             c.heights = m.headHeights(s);
-            if (CACHE_LIMIT_CHECK(MOVE_CACHE)) MOVE_CACHE.clear();
+            if (MOVE_CACHE.size() > 64) MOVE_CACHE.clear();
             MOVE_CACHE.put(id, c);
-            String sig = spec.mode() + n + "/" + m.segments;
+            String sig = spec.mode() + n + "/" + m.segments + key;
             if (!sig.equals(LAST_MOVE_LOG)) {
                 LAST_MOVE_LOG = sig;
                 ShingleMath.Result x = c.skin.result;
-                WormsOfArrakis.LOGGER.info("[WormsOfArrakis] path {}: width={} segments={} built segments {}..{} quads={} (liner/skin/lip/rims {}/{}/{}/{}) HEAD_LENGTH body={} total={}",
-                        spec.mode(), m.width, m.segments, c.skin.from, c.skin.to, x.quads, x.byKind[0], x.byKind[1], x.byKind[2], x.byKind[3] + x.byKind[4],
-                        HeadSpec.BODY_LENGTH, String.format("%.2f", HeadSpec.headLength(m.width)));
+                WormsOfArrakis.LOGGER.info("[WormsOfArrakis] path {}: width={} segments={} built segments {}..{} quads={} (liner/skin/lip/rims {}/{}/{}/{}) of which head flaps {}, HEAD_LENGTH={}, stagger={} seed={} tiles={} jitter={}, liner inset {}..{}",
+                        spec.mode(), m.width, m.segments, c.skin.from, c.skin.to, x.quads, x.byKind[0], x.byKind[1], x.byKind[2], x.byKind[3] + x.byKind[4], c.skin.flapQuads,
+                        String.format("%.2f", HeadSpec.headLength(m.width)), TestFlags.stagger, seedFor(id), TestFlags.tiles, TestFlags.jitter,
+                        String.format("%.3f", x.linerInsetMin), String.format("%.3f", x.linerInsetUsed));
             }
         }
         long buildNs = System.nanoTime() - t0;
@@ -180,7 +176,6 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
             }
         } else HOLD_LOGGED.remove(id);
         final ShingleMath.Result res = c.skin.result;
-        final int linerColor = linerMode >= 1.5 ? ShingleMath.LINER_DARK : ShingleMath.LINER_TINT;
         int light = state.lightCoords;
         poseStack.pushPose();
         poseStack.mulPose(Axis.YP.rotationDegrees(-state.getGeckolibData(YAW)));
@@ -193,7 +188,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
                 float[] v = res.v;
                 for (int q = 0; q < res.quads; q++) {
                     int b = q * 32;
-                    int color = res.kind[q] == ShingleMath.LINER ? linerColor : ShingleMath.WHITE;
+                    int color = res.color[q];
                     nm.transform(v[b + 5], v[b + 6], v[b + 7], out);
                     for (int k = 0; k < 4; k++) {
                         int atv = b + k * 8;
@@ -206,19 +201,8 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
             });
         }
         poseStack.popPose();
-        // the head: the GeckoLib mouth model, posed on joint 0 by adjustRenderPose
-        headValid = true;
-        headY = c.headY;
-        headZ = c.headZ;
-        headPhi = c.headPhi;
-        headRing = m.r0;
-        super.submit(state, poseStack, collector, camera);
-        headValid = false;
     }
 
-    private static boolean CACHE_LIMIT_CHECK(Map<?, ?> map) {
-        return map.size() > 64;
-    }
 
     @Override
     public void adjustModelBonesForRender(RenderPassInfo<EntityRenderState> info, BoneSnapshots bones) {
@@ -325,7 +309,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
         double[][] a = TestAnim.angles(spec, state.getGeckolibData(AGE));
         Integer id = state.getGeckolibData(ID);
         Cached c = CACHE.get(id);
-        String key = spec.serialize();
+        String key = spec.serialize() + "|" + TestFlags.visualKey();
         boolean rebuild = c == null || !key.equals(c.key) || !java.util.Arrays.equals(c.yaw, a[0]) || !java.util.Arrays.equals(c.pitch, a[1]);
         long t0 = System.nanoTime();
         if (rebuild) {
@@ -336,7 +320,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
             c.key = key;
             c.yaw = a[0].clone();
             c.pitch = a[1].clone();
-            c.res = ShingleMath.build(chain, n, r, per, ShingleMath.Options.defaults(base, liner));
+            c.res = ShingleMath.build(chain, n, r, per, visual(ShingleMath.Options.defaults(base, liner), id).withLinerColor(liner2 ? ShingleMath.LINER_DARK : ShingleMath.LINER_TINT));
             if (CACHE.size() > 64) CACHE.clear();
             CACHE.put(id, c);
             if (!LOGGED_SHINGLE || !key.equals(LAST_LOGGED)) {
@@ -364,7 +348,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
             float[] v = res.v;
             for (int q = 0; q < res.quads; q++) {
                 int b = q * 32;
-                int color = res.kind[q] == ShingleMath.LINER ? linerColor : ShingleMath.WHITE;
+                int color = res.color[q];
                 nm.transform(v[b + 5], v[b + 6], v[b + 7], out);
                 for (int k = 0; k < 4; k++) {
                     int at = b + k * 8;

@@ -101,8 +101,10 @@ final class WormModels {
                         s.kind(), n, segs, len, s.mode(), scaleMode ? per : 0, prm.lipLength(), segs, quads);
                 return model(id, top, r);
             }
-            case "mouth": case "move":
+            case "mouth":
                 return MouthModel.build(s, id, n, r);
+            case "move":   // drawn entirely by the renderer (head ring + flaps are skin geometry); an empty model keeps GeckoLib happy
+                return model(id, new GeoBone[0], r);
             default:
                 throw new IllegalArgumentException("unknown worm kind " + s.kind());
         }

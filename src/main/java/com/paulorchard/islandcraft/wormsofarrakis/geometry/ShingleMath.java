@@ -23,7 +23,8 @@ public final class ShingleMath {
     public static final double MAX_LIP_FRACTION = 0.6;   // of the pitch
     public static final double MIN_LIP = 0.02;
     public static final double MAX_CUT_FRACTION = 0.3;   // of the skin length
-    public static final double LINER_INSET = 0.25;
+    /** Removed in prompt 04 (the liner has no fixed floor): kept only so older references compile. */
+    public static final double LINER_INSET = 0.0;
     public static final double LINER_MARGIN = 0.02;      // liner stays this far inside the deepest plate edge
     public static final double RIM_PX = 1.0;
     /** Vertex colour multiplier of the liner (ARGB). */
@@ -36,9 +37,18 @@ public final class ShingleMath {
     private ShingleMath() {}
 
     public record Options(double baseLip, double overlapMargin, double maxLipFraction, double minLip, double maxCutFraction,
-                          double rimPx, double linerInset, boolean liner) {
+                          double rimPx, double linerInset, boolean liner, double stagger, long seed, boolean tiles, double jitter, int linerColor, double linerMargin) {
+        /** Plain geometry: no stagger, no tile variation, no jitter (the maths tests of prompts 02 and 03 use this). */
         public static Options defaults(double baseLip, boolean liner) {
-            return new Options(baseLip, OVERLAP_MARGIN, MAX_LIP_FRACTION, MIN_LIP, MAX_CUT_FRACTION, RIM_PX, LINER_INSET, liner);
+            return new Options(baseLip, OVERLAP_MARGIN, MAX_LIP_FRACTION, MIN_LIP, MAX_CUT_FRACTION, RIM_PX, 0.0, liner, 0.0, 0L, false, 0.0, LINER_TINT, LINER_MARGIN);
+        }
+
+        public Options withVariety(double stagger, long seed, boolean tiles, double jitter) {
+            return new Options(baseLip, overlapMargin, maxLipFraction, minLip, maxCutFraction, rimPx, linerInset, liner, stagger, seed, tiles, jitter, linerColor, linerMargin);
+        }
+
+        public Options withLinerColor(int color) {
+            return new Options(baseLip, overlapMargin, maxLipFraction, minLip, maxCutFraction, rimPx, linerInset, liner, stagger, seed, tiles, jitter, color, linerMargin);
         }
     }
 
@@ -52,7 +62,13 @@ public final class ShingleMath {
         public double[][] gap;
         /** lip length chosen for the last plate of segment j-1 at joint j, per vertex. */
         public double[][] lip;
-        public double linerInsetUsed;
+        public int[] color = new int[1024];
+        /** Quad colour used by add() (set by the builder before each call). */
+        int curColor = WHITE;
+        public double linerInsetUsed;   // the largest inset of any built ring
+        public double linerInsetMin = Double.POSITIVE_INFINITY;
+        /** Per ring: deepest plate, lip or rim vertex radius (local radial), and the radius of the liner at joint j. */
+        public double[] deepest, linerRadius, ringDelta;
         public double maxGap = Double.NEGATIVE_INFINITY, minGap = Double.POSITIVE_INFINITY;
         public int uncovered;       // vertices where gap + margin exceeded the maximum lip (only the liner closes those)
         public int cutVertices;     // vertices where the skin trailing edge was shortened
@@ -79,23 +95,44 @@ public final class ShingleMath {
                 v[at + 3] = uv[o][0]; v[at + 4] = uv[o][1];
                 v[at + 5] = (float) (nrm[0] / len); v[at + 6] = (float) (nrm[1] / len); v[at + 7] = (float) (nrm[2] / len);
             }
+            if (quads + 1 > color.length) color = Arrays.copyOf(color, color.length * 2);
+            color[quads] = curColor;
             kind[quads] = k;
             byKind[k]++;
             quads++;
         }
     }
 
-    /** Gap per ring vertex at joint j (between segment j-1 and j), from the actual frames. */
+    /** Gap per ring vertex at joint j (between segment j-1 and j), from the actual frames; both rings unrotated. */
     public static double[] jointGap(ChainMath c, int j, int n, double r0) {
+        return jointGap(c, j, n, r0, 0.0, 0.0);
+    }
+
+    /**
+     * Gap at joint j for the vertices of ring j-1 (turned by dPrev about its axis) against the real surface of ring j
+     * (turned by dNext): the point of ring j's polygon at the same angle, found on its face edge, so rings that do not
+     * line up (stagger) are measured against what is really there, not against the vertex with the same index.
+     */
+    public static double[] jointGap(ChainMath c, int j, int n, double r0, double dPrev, double dNext) {
         double[] g = new double[n];
         double[] axis = c.axis(j - 1);
+        double step = 2 * Math.PI / n, apo = Math.cos(Math.PI / n);
         for (int i = 0; i < n; i++) {
-            double a = 2 * Math.PI * i / n;
-            double[] off = {r0 * Math.sin(a), r0 * Math.cos(a), 0};
-            double[] p = ChainMath.apply(c.frame[j - 1], off), q = ChainMath.apply(c.frame[j], off);
+            double a = step * i + dPrev;
+            double t = (a - dNext) % step;
+            if (t < 0) t += step;
+            double rho = r0 * apo / Math.cos(t - Math.PI / n);
+            double[] p = ChainMath.apply(c.frame[j - 1], new double[]{r0 * Math.sin(a), r0 * Math.cos(a), 0});
+            double[] q = ChainMath.apply(c.frame[j], new double[]{rho * Math.sin(a), rho * Math.cos(a), 0});
             g[i] = dot(sub(q, p), axis);
         }
         return g;
+    }
+
+    /** World position of the front-edge skin vertex i of ring k (the vertex the head flaps hinge on). */
+    public static double[] frontVertex(ChainMath c, int k, int n, double r0, double delta, int i) {
+        double a = 2 * Math.PI * i / n + delta;
+        return world(c, k, c.frame[k], Math.sin(a), Math.cos(a), r0, 0);
     }
 
     public static Result build(ChainMath c, int n, double r0, int per, Options o) {
@@ -111,13 +148,19 @@ public final class ShingleMath {
         int segs = c.segments;
         res.gap = new double[segs][];
         res.lip = new double[segs][];
+        res.deepest = new double[segs];
+        Arrays.fill(res.deepest, Double.POSITIVE_INFINITY);
+        res.ringDelta = new double[segs];
+        if (o.stagger() != 0) {
+            double[] u = Stagger.offsets(o.seed(), segs);
+            for (int k = 0; k < segs; k++) res.ringDelta[k] = u[k] * o.stagger() * (2 * Math.PI / n);
+        }
         double maxLip = o.maxLipFraction() * pitch;
-        double deepest = Double.POSITIVE_INFINITY;   // lowest radius reached below the axis by any plate edge (local radial)
 
         // pass 1: per-joint gaps, lips, cuts
         double[][][] lipAt = new double[segs][][], cutAt = new double[segs][][];
         for (int j = Math.max(1, from); j <= Math.min(segs - 1, to + 1); j++) {
-            double[] g = jointGap(c, j, n, r0);
+            double[] g = jointGap(c, j, n, r0, res.ringDelta[j - 1], res.ringDelta[j]);
             res.gap[j] = g;
             double[] lip = new double[n], cut = new double[n];
             for (int i = 0; i < n; i++) {
@@ -143,14 +186,15 @@ public final class ShingleMath {
         // pass 2: plates
         for (int k = Math.max(0, from); k <= Math.min(segs - 1, to); k++) {
             double[][] f = c.frame[k];
+            double dk = res.ringDelta[k];
             for (int s = 0; s < per; s++) {
                 boolean last = s == per - 1 && k < segs - 1;
                 double[] lipL = last ? lipAt[k][0] : null, cutL = last ? cutAt[k][0] : null;
                 double u0 = s * pitch;
-                double[][] front = new double[n][], rear = new double[n][], lipEnd = new double[n][], rimEnd = new double[n][];
+                double[][] front = new double[n][], rear = new double[n][], lipEnd = new double[n][];
                 double[][] lipRim = new double[n][], leadEnd = new double[n][];
                 for (int i = 0; i < n; i++) {
-                    double a = 2 * Math.PI * i / n, sa = Math.sin(a), ca = Math.cos(a);
+                    double a = 2 * Math.PI * i / n + dk, sa = Math.sin(a), ca = Math.cos(a);
                     double uRear = skin * cos - (cutL == null ? 0 : cutL[i]);
                     double rRear = r0 + uRear * tan;
                     double L = lipL == null ? o.baseLip() : lipL[i];
@@ -163,43 +207,58 @@ public final class ShingleMath {
                     // leading-edge rim hangs inward from the leading edge, perpendicular to the skin, facing the head
                     double rd = r0 - rimW * cos, ud = rimW * sin;
                     leadEnd[i] = world(c, k, f, sa, ca, rd, u0 + ud);
-                    deepest = Math.min(deepest, Math.min(rr2, rd));
+                    res.deepest[k] = Math.min(res.deepest[k], Math.min(rr2, rd));
                     res.minPlateRadius = Math.min(res.minPlateRadius, Math.min(rr2, rd));
                 }
                 double[] tail = ChainMath.apply(f, new double[]{0, 0, -1});
                 double[] head = {-tail[0], -tail[1], -tail[2]};
                 for (int i = 0; i < n; i++) {
                     int jn = (i + 1) % n;
-                    double am = 2 * Math.PI * (i + 0.5) / n;
+                    double am = 2 * Math.PI * (i + 0.5) / n + dk;
                     double[] radial = ChainMath.apply(f, new double[]{Math.sin(am), Math.cos(am), 0});
-                    res.add(SKIN, new double[][]{front[i], front[jn], rear[jn], rear[i]}, uvFull(1f), radial);
-                    res.add(LIP, new double[][]{rear[i], rear[jn], lipEnd[jn], lipEnd[i]}, uvFull(ScaleMath.LIP_V), tail);
+                    int o8 = Stagger.orientation(o.seed(), k, i, Stagger.SALT_ORIENT, o.tiles());
+                    res.curColor = Stagger.scale(WHITE, Stagger.jitterFactor(o.seed(), k, i, Stagger.SALT_JITTER, o.jitter()));
+                    res.add(SKIN, new double[][]{front[i], front[jn], rear[jn], rear[i]}, uv(o8, 0f, 1f), radial);
+                    res.add(LIP, new double[][]{rear[i], rear[jn], lipEnd[jn], lipEnd[i]}, uv(o8, 0f, ScaleMath.LIP_V), tail);
                     if (o.rimPx() > 0) {
-                        res.add(RIM_LIP, new double[][]{lipEnd[i], lipEnd[jn], lipRim[jn], lipRim[i]}, uvStrip(ScaleMath.LIP_V, (float) (ScaleMath.LIP_V + rimW)), tail);
-                        res.add(RIM_SKIN, new double[][]{front[i], front[jn], leadEnd[jn], leadEnd[i]}, uvFull((float) rimW), head);
+                        res.add(RIM_LIP, new double[][]{lipEnd[i], lipEnd[jn], lipRim[jn], lipRim[i]}, uv(o8, ScaleMath.LIP_V, (float) (ScaleMath.LIP_V + rimW)), tail);
+                        res.add(RIM_SKIN, new double[][]{front[i], front[jn], leadEnd[jn], leadEnd[i]}, uv(o8, 0f, (float) rimW), head);
                     }
                 }
             }
         }
 
-        // liner: closed mitre-ring loft at r0 - inset, deep enough to stay behind every plate edge
-        double inset = Math.max(o.linerInset(), r0 - deepest + LINER_MARGIN);
-        res.linerInsetUsed = inset;
+        // liner: closed mitre-ring loft right under the skin. Per ring its radius is the deepest plate, lip or rim vertex of that
+        // ring minus a small margin (no fixed floor); at a joint it is the smaller of the two neighbouring rings.
+        double[] rad = new double[segs + 1];
+        Arrays.fill(rad, r0 - 0.25);
+        for (int j = 0; j <= segs; j++) {
+            double d = Double.POSITIVE_INFINITY;
+            if (j - 1 >= Math.max(0, from) && j - 1 <= Math.min(segs - 1, to)) d = Math.min(d, res.deepest[j - 1]);
+            if (j >= Math.max(0, from) && j <= Math.min(segs - 1, to)) d = Math.min(d, res.deepest[j]);
+            if (d < Double.POSITIVE_INFINITY) rad[j] = d - o.linerMargin();
+        }
+        res.linerRadius = rad;
+        for (int j = Math.max(0, from); j <= Math.min(segs, to + 1); j++) {
+            res.linerInsetUsed = Math.max(res.linerInsetUsed, r0 - rad[j]);
+            res.linerInsetMin = Math.min(res.linerInsetMin, r0 - rad[j]);
+        }
         if (o.liner()) {
-            double[] rad = new double[segs + 1];
-            Arrays.fill(rad, r0 - inset);
             ChainMath liner = c.withRadius(rad);
             for (int k = Math.max(0, from); k <= Math.min(segs - 1, to); k++) {
-                double ph = Math.PI / n;   // liner seams sit half a face away from the plate edges
+                double ph = Math.PI / n + res.ringDelta[k];   // the liner turns with its ring and keeps its half-face turn against the plates
                 double[][] fr = liner.miterRing(k, false, n, ph), rr = liner.miterRing(k + 1, true, n, ph);
                 for (int i = 0; i < n; i++) {
                     int jn = (i + 1) % n;
                     double am = 2 * Math.PI * (i + 0.5) / n + ph;
                     double[] radial = ChainMath.apply(c.frame[k], new double[]{Math.sin(am), Math.cos(am), 0});
-                    res.add(LINER, new double[][]{fr[i], fr[jn], rr[jn], rr[i]}, uvFull(1f), radial);
+                    int o8 = Stagger.orientation(o.seed(), k, i, Stagger.SALT_LINER_ORIENT, o.tiles());
+                    res.curColor = Stagger.scale(o.linerColor(), Stagger.jitterFactor(o.seed(), k, i, Stagger.SALT_LINER_JITTER, o.jitter()));
+                    res.add(LINER, new double[][]{fr[i], fr[jn], rr[jn], rr[i]}, uv(o8, 0f, 1f), radial);
                 }
             }
         }
+        res.curColor = WHITE;
         return res;
     }
 
@@ -208,12 +267,15 @@ public final class ShingleMath {
         return new double[]{c.center[k][0] + l[0], c.center[k][1] + l[1], c.center[k][2] + l[2]};
     }
 
-    private static float[][] uvFull(float vMax) {
-        return new float[][]{{0, 0}, {1, 0}, {1, vMax}, {0, vMax}};
-    }
-
-    private static float[][] uvStrip(float v0, float v1) {
-        return new float[][]{{0, v0}, {1, v0}, {1, v1}, {0, v1}};
+    /** UV corners of a face (in the order front i, front i+1, rear i+1, rear i) inside one tile, in orientation o of the 8 tile orientations. */
+    public static float[][] uv(int o, float v0, float v1) {
+        float[][] st = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+        float[][] out = new float[4][];
+        for (int q = 0; q < 4; q++) {
+            float[] r = Stagger.orient(o, st[q][0], st[q][1]);
+            out[q] = new float[]{r[0], v0 + r[1] * (v1 - v0)};
+        }
+        return out;
     }
 
     private static double[] sub(double[] a, double[] b) { return new double[]{a[0] - b[0], a[1] - b[1], a[2] - b[2]}; }

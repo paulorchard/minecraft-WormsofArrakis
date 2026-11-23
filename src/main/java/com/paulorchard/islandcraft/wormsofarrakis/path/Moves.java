@@ -28,7 +28,9 @@ public final class Moves {
         public int segments;
         public int n;                    // exposed segments (emerge, crash)
         public double s0, sHold, sEnd, sCross1 = Double.NaN, sCross2 = Double.NaN, sTurn = Double.NaN;
-        public double apexY, tunnelDepth, topRadius, underRadius;
+        public double apexY, tunnelDepth, topRadius, radiusDown, underRadius;
+        public double entryAngle = Double.NaN, exitAngle = Double.NaN, exposedLength = Double.NaN;
+        public String note = "";
         public double[] tTab, sTab;      // crash: ballistic time table
         public double advanceTime, cycle;
 
@@ -59,19 +61,23 @@ public final class Moves {
 
         public WormPose pose(double s) { return WormPose.at(path, s, segments, 1.0); }
 
-        /** {base height, top of the head height}; the head is a rigid straight piece along the chord to the path point headLength ahead, so its tip lies on the path. */
+        /** Head tip {model z, height}: the closed flap apex, on the axis of the head ring (segment 0) in front of its front edge. */
+        public double[] tip(double s) {
+            WormPose p = WormPose.at(path, s, 2, 1.0, 2);
+            double cone = HeadSpec.CONE_HEIGHT * r0;
+            return new double[]{p.joints[0][2] + (p.joints[0][2] - p.joints[1][2]) * cone, p.joints[0][1] + (p.joints[0][1] - p.joints[1][1]) * cone};
+        }
+
+        /** {base height, top of the head height}: the rear of the head ring (joint 1) and the closed flap tip. */
         public double[] headHeights(double s) {
-            double[] b = path.pos(s);
-            double sf = WormPose.ahead(path, s, new double[]{0, b[1], b[0]}, HeadSpec.headLength(width));
-            double[] f = path.pos(sf);
-            double dy = (f[1] - b[1]) / HeadSpec.headLength(width);
-            return new double[]{b[1], b[1] + dy * HeadSpec.headLength(width)};
+            WormPose p = WormPose.at(path, s, 2, 1.0, 2);
+            return new double[]{p.joints[1][1], tip(s)[1]};
         }
 
         /** Maximum exposed count while the head advances (scanned every 0.25 blocks of arc). */
         public int maxExposed() {
             int max = 0;
-            for (double s = s0; s <= sEnd; s += 0.25) max = Math.max(max, pose(s).exposed(0));
+            for (double s = s0; s <= sEnd; s += 0.25) max = Math.max(max, pose(s).exposedBody(0));
             return max;
         }
 
@@ -83,24 +89,77 @@ public final class Moves {
         }
 
         public double span() { return Double.isNaN(sCross2) ? Double.NaN : path.pos(sCross2)[0] - path.pos(sCross1)[0]; }
+
+        /** One measured moment of the move (heights and travel in body widths relative to the base level). */
+        public record Frame(double t, double tipHeightW, double headingDeg, double dxW, int exposedRings) {
+            public String line() {
+                return String.format(java.util.Locale.ROOT, "frame t=%.2f: headTipHeight=%.2fW headHeading=%.0fdeg headDx=%.2fW exposedRings=%d", t, tipHeightW, headingDeg, dxW, exposedRings);
+            }
+        }
+
+        private double[] window;
+
+        private double tipHeightAt(double tau) { return tip(at(tau)[0])[1]; }
+
+        /** Script times {a, b} of the normalised window: a = the head tip rises above the base level, b = it is back below it for the last time. */
+        public synchronized double[] window() {
+            if (window != null) return window;
+            double a = Double.NaN, b = Double.NaN, prev = tipHeightAt(0);
+            for (double tau = 0.01; tau < cycle; tau += 0.01) {
+                double y = tipHeightAt(tau);
+                if (prev <= 0 && y > 0 && Double.isNaN(a)) a = tau;
+                if (prev > 0 && y <= 0) b = tau;
+                prev = y;
+            }
+            window = new double[]{Double.isNaN(a) ? 0 : a, Double.isNaN(b) ? cycle : b};
+            return window;
+        }
+
+        /** Script time of the normalised time t in [0, 1]. */
+        public double tauAt(double t) {
+            double[] w = window();
+            return w[0] + Math.max(0, Math.min(1, t)) * (w[1] - w[0]);
+        }
+
+        public Frame frame(double t) {
+            double s = at(tauAt(t))[0];
+            double[] tp = tip(s);
+            double z0 = tip(at(tauAt(0))[0])[0];
+            WormPose p = pose(s);
+            double[] from = {0, p.joints[0][1], p.joints[0][2]};
+            double sf = WormPose.ahead(path, s, from, HeadSpec.CONE_HEIGHT * r0);
+            return new Frame(t, tp[1] / width, Math.toDegrees(path.theta(sf)), (tp[0] - z0) / width, p.exposedBody(0));
+        }
     }
 
     private static double rise() { return Math.sin(Math.toRadians(ScaleMath.TILT_DEG)) * ScaleMath.SKIN_LENGTH; }
 
-    /** Crest: the body rises as a hump whose top surface is crestFraction x width above the sand at the peak. */
-    public static Move crest(double width, int segments, double crestFraction, double speed, double radiusFactor, boolean force) {
-        if (crestFraction > 0.5 + 1e-9 && !force) throw new Rejected("crest_fraction must be at most 0.5 (less than half the body thickness above the sand)");
-        if (crestFraction <= 0) throw new Rejected("crest_fraction must be above 0");
+    public static final double MAX_CREST_HEIGHT = 3.0;
+
+    /**
+     * Crest: the body rises as a hump whose top surface is heightWidths body widths above the sand at the apex (local y = 0 is
+     * the base level). The rise to the apex has radius radiusUpWidths x width, the descent radiusDownWidths x width; both are
+     * clamped up to the bend limit unless force. The path is a planar arch under the surface: line, rise (two arcs of the rise
+     * radius), descent (two arcs of the descent radius), line.
+     */
+    public static Move crest(double width, int segments, double heightWidths, double radiusUpWidths, double radiusDownWidths, double speed, boolean force) {
+        if (heightWidths <= 0) throw new Rejected("crest height must be above 0");
+        if (heightWidths > MAX_CREST_HEIGHT + 1e-9 && !force) throw new Rejected("crest height must be at most " + MAX_CREST_HEIGHT + " body widths (above that it is an emerge or a crash); use force");
+        String note = "";
+        double limitW = BendLimit.MIN_BEND_RADIUS_WIDTHS;
+        if (!force && (radiusUpWidths < limitW || radiusDownWidths < limitW)) {
+            note = String.format("radius clamped up to the limit of %.1f body widths", limitW);
+            radiusUpWidths = Math.max(radiusUpWidths, limitW);
+            radiusDownWidths = Math.max(radiusDownWidths, limitW);
+        }
         double r0 = HeadSpec.ringRadius(width);
-        double limitR = BendLimit.minRadius(width), R = limitR * radiusFactor;
-        if (R + 1e-9 < limitR && !force) throw new Rejected(String.format("arch radius %.1f is below the limit %.1f (%.1f body widths); use force", R, limitR, BendLimit.MIN_BEND_RADIUS_WIDTHS));
+        double Ru = radiusUpWidths * width, Rd = radiusDownWidths * width;
         double depth = -(r0 + 1.5);
-        double peakAxis = crestFraction * width - r0 - rise();
+        double peakAxis = heightWidths * width - r0 - rise();
         double h = peakAxis - depth;
-        double c = 1.0 - h / (2 * R);
-        if (c < -1 || c > 1) throw new Rejected("arch radius too small for this crest height; increase the radius or lower crest_fraction");
-        double beta = Math.toDegrees(Math.acos(c));
-        PlanarPath p = PlanarPath.start(0, depth, 0).line(TUNNEL_LEAD).arc(R, beta).arc(R, -2 * beta).arc(R, beta).line(10).build();
+        if (h > 2 * Math.min(Ru, Rd) + 1e-9) throw new Rejected("the arch radius is too small for this crest height; increase radius or lower height");
+        double b1 = Math.toDegrees(Math.acos(1.0 - h / (2 * Ru))), b2 = Math.toDegrees(Math.acos(1.0 - h / (2 * Rd)));
+        PlanarPath p = PlanarPath.start(0, depth, 0).line(TUNNEL_LEAD).arc(Ru, b1).arc(Ru, -b1).arc(Rd, -b2).arc(Rd, b2).line(10).build();
         Move m = new Move();
         m.kind = "crest";
         m.path = p;
@@ -111,10 +170,28 @@ public final class Moves {
         m.s0 = 0;
         m.tunnelDepth = depth;
         m.apexY = peakAxis;
-        m.topRadius = R;
-        m.sEnd = TUNNEL_LEAD + 4 * R * Math.toRadians(beta) + segments + HeadSpec.headLength(width) + 2 * r0 + 4;
+        m.topRadius = Ru;
+        m.radiusDown = Rd;
+        m.note = note;
+        m.sEnd = TUNNEL_LEAD + 2 * Ru * Math.toRadians(b1) + 2 * Rd * Math.toRadians(b2) + segments + HeadSpec.headLength(width) + 2 * r0 + 4;
         m.advanceTime = (m.sEnd - m.s0) / m.speed;
         m.cycle = m.advanceTime;
+        // where the top of the body crosses the base level on the way up and down
+        double top = r0 + rise(), prev = p.pos(0)[1] + top;
+        double sIn = Double.NaN, sOut = Double.NaN;
+        for (double s = 0.05; s < p.length(); s += 0.05) {
+            double y = p.pos(s)[1] + top;
+            if (prev <= 0 && y > 0 && Double.isNaN(sIn)) sIn = s;
+            if (prev > 0 && y <= 0) sOut = s;
+            prev = y;
+        }
+        if (!Double.isNaN(sIn) && !Double.isNaN(sOut)) {
+            m.sCross1 = sIn;
+            m.sCross2 = sOut;
+            m.entryAngle = Math.toDegrees(p.theta(sIn));
+            m.exitAngle = -Math.toDegrees(p.theta(sOut));
+            m.exposedLength = sOut - sIn;
+        }
         return m;
     }
 
@@ -128,7 +205,7 @@ public final class Moves {
     private static double firstReach(PlanarPath path, double lo, double hi, int target, int segments) {
         for (int i = 0; i < 50; i++) {
             double mid = 0.5 * (lo + hi);
-            if (WormPose.at(path, mid, segments, 1.0, target + 1).exposed(0) >= target) hi = mid; else lo = mid;
+            if (WormPose.at(path, mid, segments, 1.0, target + 2).exposedBody(0) >= target) hi = mid; else lo = mid;
         }
         return hi;
     }
@@ -146,7 +223,7 @@ public final class Moves {
     /** Emerge: curve up to angleDeg, cross straight, stop when exactly n segments are above the surface, hold, retreat. */
     public static Move emerge(double width, int segments, int n, double angleDeg, double speed, double hold, double underRadiusWidths, boolean force) {
         if (n < 1) throw new Rejected("n must be at least 1");
-        if (segments < n + 1 && !force) throw new Rejected("the worm needs at least n + 1 = " + (n + 1) + " segments");
+        if (segments < n + 2 && !force) throw new Rejected("the worm needs at least n + 2 = " + (n + 2) + " segments (the head ring and n body rings)");
         if (angleDeg < 5 || angleDeg > 90) throw new Rejected("angle must be between 5 and 90 degrees");
         Move m = new Move();
         common(m, "emerge", width, segments, n, speed);
@@ -162,7 +239,7 @@ public final class Moves {
         m.tunnelDepth = depth;
         double sArcEnd = TUNNEL_LEAD + ur * a;
         m.sCross1 = sArcEnd + straightBelow;
-        int seg = Math.max(segments, n + 2);
+        int seg = Math.max(segments, n + 3);
         double sa = firstReach(p, m.sCross1, m.sCross1 + upLen, n, seg);
         double sb = firstReach(p, sa, m.sCross1 + upLen + 4 * n, n + 1, seg);
         m.sHold = 0.5 * (sa + sb);
@@ -183,7 +260,7 @@ public final class Moves {
         if (angleDeg < 5 || angleDeg > 85) throw new Rejected("angle must be between 5 and 85 degrees");
         double limitR = BendLimit.minRadius(width), rt = limitR * topRadiusFactor;
         if (rt + 1e-9 < limitR && !force) throw new Rejected(String.format("the top arc radius %.1f is below the limit %.1f (%.1f body widths); use force", rt, limitR, BendLimit.MIN_BEND_RADIUS_WIDTHS));
-        if (segments < n + 1 && !force) throw new Rejected("the worm needs at least n + 1 = " + (n + 1) + " segments");
+        if (segments < n + 2 && !force) throw new Rejected("the worm needs at least n + 2 = " + (n + 2) + " segments (the head ring and n body rings)");
         Move m = new Move();
         common(m, "crash", width, segments, n, speed);
         double ur = underRadiusWidths * width;
@@ -197,7 +274,7 @@ public final class Moves {
         PlanarPath probe = PlanarPath.start(0, depth, 0).line(TUNNEL_LEAD).arc(ur, angleDeg).line(upLen + 4 * n).build();
         double sArcEnd = TUNNEL_LEAD + ur * a;
         double sCross1 = sArcEnd + straightBelow;
-        int seg = Math.max(segments, n + 2);
+        int seg = Math.max(segments, n + 3);
         double sa = firstReach(probe, sCross1, sCross1 + upLen, n, seg);
         double sb = firstReach(probe, sa, sCross1 + upLen + 4 * n, n + 1, seg);
         double sTurn = 0.5 * (sa + sb);

@@ -13,6 +13,7 @@ import com.paulorchard.islandcraft.wormsofarrakis.geometry.BendLimit;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.ScaleMath;
 import com.paulorchard.islandcraft.wormsofarrakis.path.HeadSpec;
 import com.paulorchard.islandcraft.wormsofarrakis.path.Moves;
+import com.paulorchard.islandcraft.wormsofarrakis.path.WorldBase;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.WormMath;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -68,9 +69,10 @@ final class TestCommand {
         root.then(branch("wave", 2, List.of(w("width"), new Arg("segments", IntegerArgumentType.integer(1, 400)),
                 new Arg("amplitude", DoubleArgumentType.doubleArg(0, 45)), new Arg("seglen", DoubleArgumentType.doubleArg(0.25, 64)),
                 new Arg("closer", StringArgumentType.word()), new Arg("force", StringArgumentType.word()))));
-        root.then(branch("crest", 2, List.of(w("width"), new Arg("segments", IntegerArgumentType.integer(2, 400)),
-                new Arg("crest_fraction", DoubleArgumentType.doubleArg(0.05, 1.0)), new Arg("speed", DoubleArgumentType.doubleArg(0.5, 64)),
-                new Arg("force", StringArgumentType.word()))));
+        // crest <width> <segments> [height=0.4] [radius=6] [radius_down=<radius>] [speed=12] [force]   (keyed, any order; a bare number is the height)
+        root.then(Commands.literal("crest").then(Commands.argument("width", DoubleArgumentType.doubleArg(1, 128))
+                .then(Commands.argument("segments", IntegerArgumentType.integer(2, 400)).executes(ctx -> run(ctx, "crest", List.of()))
+                        .then(Commands.argument("opts", StringArgumentType.greedyString()).executes(ctx -> run(ctx, "crest", List.of()))))));
         root.then(branch("emerge", 3, List.of(w("width"), new Arg("segments", IntegerArgumentType.integer(2, 400)),
                 new Arg("n", IntegerArgumentType.integer(1, 399)), new Arg("angle", DoubleArgumentType.doubleArg(5, 90)),
                 new Arg("speed", DoubleArgumentType.doubleArg(0.5, 64)), new Arg("hold", DoubleArgumentType.doubleArg(0, 120)),
@@ -116,6 +118,38 @@ final class TestCommand {
             notice(ctx, "surface " + (TestFlags.worldSurface ? "world (client height map)" : "plane (the height the worm was spawned at)"));
             return 1;
         })));
+        root.then(Commands.literal("base").then(Commands.argument("value", StringArgumentType.word()).executes(ctx -> {
+            String v = StringArgumentType.getString(ctx, "value");
+            ServerLevel lv = ctx.getSource().getLevel();
+            double feet = ctx.getSource().getPosition().y;
+            if (v.equals("sea") || v.equals("here")) {
+                WorldBase.mode = v;
+            } else {
+                try {
+                    WorldBase.fixedY = Double.parseDouble(v);
+                    WorldBase.mode = "y";
+                } catch (NumberFormatException e) {
+                    ctx.getSource().sendFailure(Component.literal("base <y|here|sea>"));
+                    return 0;
+                }
+            }
+            notice(ctx, String.format(Locale.ROOT, "base level: y=%.2f (mode %s; the sea level of this level is %d, the constant BASE_Y is %d, your feet are at %.2f)",
+                    WorldBase.resolve(lv.getSeaLevel(), feet), WorldBase.mode, lv.getSeaLevel(), WorldBase.BASE_Y, feet));
+            return 1;
+        })));
+        root.then(Commands.literal("stagger").then(Commands.argument("value", StringArgumentType.word()).executes(ctx -> staggerCmd(ctx, -1L))
+                .then(Commands.argument("seed", com.mojang.brigadier.arguments.LongArgumentType.longArg(0)).executes(ctx -> staggerCmd(ctx, com.mojang.brigadier.arguments.LongArgumentType.getLong(ctx, "seed"))))));
+        root.then(Commands.literal("jitter").then(Commands.argument("value", DoubleArgumentType.doubleArg(0, 0.1)).executes(ctx -> {
+            TestFlags.jitter = DoubleArgumentType.getDouble(ctx, "value");
+            notice(ctx, "jitter " + TestFlags.jitter + " (brightness multiplier 1 +- jitter per face)");
+            return 1;
+        })));
+        root.then(Commands.literal("tiles").then(Commands.argument("state", StringArgumentType.word()).executes(ctx -> {
+            TestFlags.tiles = !StringArgumentType.getString(ctx, "state").equals("off");
+            notice(ctx, "tiles " + (TestFlags.tiles ? "on (seeded tile orientation per face)" : "off"));
+            return 1;
+        })));
+        root.then(Commands.literal("freeze").then(Commands.argument("t", StringArgumentType.word()).executes(TestCommand::freezeCmd)));
         root.then(branch("mouth", 2, List.of(w("width"), new Arg("action", StringArgumentType.word()))));
         root.then(Commands.literal("clear").executes(ctx -> {
             int n = 0;
@@ -131,6 +165,62 @@ final class TestCommand {
             return removed;
         }));
         d.register(root);
+    }
+
+    private static int staggerCmd(CommandContext<CommandSourceStack> ctx, long seed) {
+        String v = StringArgumentType.getString(ctx, "value");
+        double f;
+        if (v.equals("off")) f = 0;
+        else {
+            try {
+                f = Double.parseDouble(v);
+            } catch (NumberFormatException e) {
+                ctx.getSource().sendFailure(Component.literal("stagger <fraction|off> [seed]"));
+                return 0;
+            }
+        }
+        TestFlags.stagger = Math.max(0, Math.min(4, f));
+        if (seed >= 0) TestFlags.seed = seed;
+        notice(ctx, "stagger " + (TestFlags.stagger == 0 ? "off" : TestFlags.stagger + " of a face") + ", seed " + (TestFlags.seed >= 0 ? TestFlags.seed : "= entity id"));
+        return 1;
+    }
+
+    /** freeze <t|off>: holds every running move at normalised time t (0 = head tip rises above the base level, 1 = back below it) and logs the frame. */
+    private static int freezeCmd(CommandContext<CommandSourceStack> ctx) {
+        String v = StringArgumentType.getString(ctx, "t");
+        double t = -1;
+        if (!v.equals("off")) {
+            try {
+                t = Double.parseDouble(v);
+            } catch (NumberFormatException e) {
+                ctx.getSource().sendFailure(Component.literal("freeze <t 0..1|off>"));
+                return 0;
+            }
+            if (t < 0 || t > 1) {
+                ctx.getSource().sendFailure(Component.literal("t must be between 0 and 1"));
+                return 0;
+            }
+        }
+        int n = 0;
+        for (net.minecraft.world.entity.Entity e : ctx.getSource().getLevel().getAllEntities()) {
+            if (!(e instanceof TestWormEntity w) || !w.getSpecString().startsWith("move;")) continue;
+            WormSpec s = WormSpec.parse(w.getSpecString());
+            double[] p = java.util.Arrays.copyOf(s.p(), Math.max(18, s.p().length));
+            if (t < 0 && s.p(17, -1) >= 0) {   // resume from where it is held, without a jump
+                p[12] = e.tickCount;
+                p[13] = MoveFactory.tau(s, e.tickCount);
+            }
+            p[17] = t;
+            w.setSpec(new WormSpec(s.kind(), s.mode(), p));
+            Moves.Move m = MoveFactory.get(s);
+            if (t >= 0) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] freeze {} {}", m.kind, m.frame(t).line());
+            n++;
+        }
+        int changed = n;
+        String msg = t < 0 ? "freeze off: " + changed + " moving worms resume" : "frozen at t=" + t + ": " + changed + " moving worms (frame line in the log)";
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {}", msg);
+        ctx.getSource().sendSuccess(() -> Component.literal(msg), true);
+        return changed;
     }
 
     /** True when the command carries the word force in any of its free-text arguments. */
@@ -161,23 +251,57 @@ final class TestCommand {
         return v == Math.rint(v) ? Long.toString((long) v) : String.format(Locale.ROOT, "%.2f", v);
     }
 
-    /** One INFO line with the measured numbers of a move (pure maths, same as the unit tests). */
+    /** One INFO line with the measured numbers of a move (pure maths, same as the unit tests), then the frame table. */
     private static void logMove(Moves.Move m, WormSpec s) {
         double rise = Math.sin(Math.toRadians(ScaleMath.TILT_DEG)) * ScaleMath.SKIN_LENGTH;
+        String hl = String.format(Locale.ROOT, "%.2f", HeadSpec.headLength(m.width));
         switch (m.kind) {
-            case "crest" -> WormsOfArrakis.LOGGER.info("[WormsOfArrakis] path crest: width={} segments={} fraction={} peakTop={} blocks above the sand (limit {}), arch radius {}, tunnel depth {}, speed {} blocks/s",
-                    m.width, m.segments, s.p(2, 0.4), String.format(Locale.ROOT, "%.2f", m.apexY + m.r0 + rise), 0.5 * m.width, String.format(Locale.ROOT, "%.1f", m.topRadius),
-                    String.format(Locale.ROOT, "%.2f", m.tunnelDepth), m.speed);
+            case "crest" -> WormsOfArrakis.LOGGER.info("[WormsOfArrakis] path crest: width={} segments={} height={}W radius={}W radius_down={}W apexTop={} (target {}) entryAngle={} exitAngle={} span={} exposedLength={} tunnelDepth={} speed={} blocks/s{}",
+                    m.width, m.segments, s.p(2, 0.4), String.format(Locale.ROOT, "%.2f", m.topRadius / m.width), String.format(Locale.ROOT, "%.2f", m.radiusDown / m.width),
+                    String.format(Locale.ROOT, "%.2f", m.apexY + m.r0 + rise), String.format(Locale.ROOT, "%.2f", s.p(2, 0.4) * m.width),
+                    String.format(Locale.ROOT, "%.1f", m.entryAngle), String.format(Locale.ROOT, "%.1f", m.exitAngle), String.format(Locale.ROOT, "%.1f", m.span()),
+                    String.format(Locale.ROOT, "%.1f", m.exposedLength), String.format(Locale.ROOT, "%.2f", m.tunnelDepth), m.speed, m.note.isEmpty() ? "" : " (" + m.note + ")");
             case "emerge" -> {
                 double[] h = m.headHeights(m.sHold);
-                WormsOfArrakis.LOGGER.info("[WormsOfArrakis] path emerge: width={} segments={} n={} angle={} exposed={} headBaseHeight={} headTopHeight={} HEAD_LENGTH(body {}, total {}) hold={}s speed={} blocks/s",
-                        m.width, m.segments, m.n, s.p(3, 90), m.pose(m.sHold).exposed(0), String.format(Locale.ROOT, "%.2f", h[0]), String.format(Locale.ROOT, "%.2f", h[1]),
-                        HeadSpec.BODY_LENGTH, String.format(Locale.ROOT, "%.2f", HeadSpec.headLength(m.width)), m.hold, m.speed);
+                WormsOfArrakis.LOGGER.info("[WormsOfArrakis] path emerge: width={} segments={} n={} angle={} exposed={} headBaseHeight={} headTopHeight={} HEAD_LENGTH={} hold={}s speed={} blocks/s",
+                        m.width, m.segments, m.n, s.p(3, 90), m.pose(m.sHold).exposedBody(0), String.format(Locale.ROOT, "%.2f", h[0]), String.format(Locale.ROOT, "%.2f", h[1]),
+                        hl, m.hold, m.speed);
             }
-            default -> WormsOfArrakis.LOGGER.info("[WormsOfArrakis] path crash: width={} segments={} n={} angle={} maxExposed={} span={} apexHeight={} topRadius={} exposedPath={} ballistic={}",
+            default -> WormsOfArrakis.LOGGER.info("[WormsOfArrakis] path crash: width={} segments={} n={} angle={} maxExposed={} span={} apexHeight={} topRadius={} exposedPath={} HEAD_LENGTH={} ballistic={}",
                     m.width, m.segments, m.n, s.p(3, 70), m.maxExposed(), String.format(Locale.ROOT, "%.1f", m.span()), String.format(Locale.ROOT, "%.1f", m.apexY),
-                    String.format(Locale.ROOT, "%.1f", m.topRadius), String.format(Locale.ROOT, "%.1f", m.sCross2 - m.sCross1), s.p(9, 1) > 0);
+                    String.format(Locale.ROOT, "%.1f", m.topRadius), String.format(Locale.ROOT, "%.1f", m.sCross2 - m.sCross1), hl, s.p(9, 1) > 0);
         }
+        for (int i = 0; i <= 3; i++) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} {}", m.kind, m.frame(i / 3.0).line());
+    }
+
+    /** Parses the free text after crest width segments: height=, radius=, radius_down=, speed=, force; bare numbers are height then speed. */
+    private static double[] crestOptions(String opts, boolean[] force) {
+        double[] v = {0.4, 6.0, 0.0, 12.0};   // height, radius, radius_down (0 = same), speed
+        int bare = 0;
+        for (String tok : opts.trim().split("\s+")) {
+            if (tok.isEmpty()) continue;
+            if (tok.equals("force")) { force[0] = true; continue; }
+            try {
+                int eq = tok.indexOf('=');
+                if (eq < 0) {
+                    double x = Double.parseDouble(tok);
+                    if (bare == 0) v[0] = x; else if (bare == 1) v[3] = x;
+                    bare++;
+                    continue;
+                }
+                double x = Double.parseDouble(tok.substring(eq + 1));
+                switch (tok.substring(0, eq)) {
+                    case "height", "crest_fraction" -> v[0] = x;
+                    case "radius" -> v[1] = x;
+                    case "radius_down" -> v[2] = x;
+                    case "speed" -> v[3] = x;
+                    default -> throw new IllegalArgumentException("unknown key " + tok.substring(0, eq));
+                }
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("not a number: " + tok);
+            }
+        }
+        return v;
     }
 
     private static Arg w(String name) {
@@ -292,8 +416,18 @@ final class TestCommand {
                 int segs = (int) num(ctx, args, "segments", 60);
                 WormSpec ms;
                 switch (kind) {
-                    case "crest" -> ms = MoveFactory.spec("crest", width, segs, num(ctx, args, "crest_fraction", 0.4), 0, num(ctx, args, "speed", 8), 0, 0, 0,
-                            false, true, force, 1.0, 1.0, 1);
+                    case "crest" -> {
+                        boolean[] fo = {force};
+                        double[] v;
+                        try {
+                            v = crestOptions(str(ctx, "opts", ""), fo);
+                        } catch (IllegalArgumentException bad) {
+                            ctx.getSource().sendFailure(Component.literal("crest: " + bad.getMessage() + " (crest <width> <segments> [height=0.4] [radius=6] [radius_down] [speed=12] [force])"));
+                            return 0;
+                        }
+                        force = fo[0];
+                        ms = MoveFactory.spec("crest", width, segs, v[0], v[1], v[3], 0, v[2], 0, false, true, force, 1.0, 1.0, 1);
+                    }
                     case "emerge" -> ms = MoveFactory.spec("emerge", width, segs, num(ctx, args, "n", 10), num(ctx, args, "angle", 90), num(ctx, args, "speed", 12),
                             num(ctx, args, "hold", 2), 0, 0, mouthOpen, true, force, 1.0, 1.0, 1);
                     default -> ms = MoveFactory.spec("crash", width, segs, num(ctx, args, "n", 10), num(ctx, args, "angle", 70), num(ctx, args, "speed", 12),
@@ -343,7 +477,11 @@ final class TestCommand {
             return 0;
         }
         worm.setSpec(spec);
-        worm.snapTo(x, pos.y, z, rot.y + 90.0F, 0.0F);
+        // moves: the path's zero (the base level of the sand) is the entity origin, so the engine stays relative and the renderer needs no translation
+        boolean isMove = spec.kind().equals("move");
+        double y = isMove ? WorldBase.resolve(level.getSeaLevel(), pos.y) : pos.y;
+        if (isMove) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] base level: y={} (mode {}, sea level of this level {}, constant {}, player feet {})", y, WorldBase.mode, level.getSeaLevel(), WorldBase.BASE_Y, pos.y);
+        worm.snapTo(x, y, z, rot.y + 90.0F, 0.0F);
         boolean added = level.addFreshEntity(worm);
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] addFreshEntity -> {} removed={} pos={} inLevel={} chunkLoaded={}", added, worm.isRemoved(), worm.position(), level.getEntity(worm.getUUID()) != null, level.hasChunkAt(worm.blockPosition()));
         int n = WormMath.faceCount(width);
