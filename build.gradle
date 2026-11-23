@@ -15,6 +15,8 @@ def geckomeshJar = "${instanceMods}/geckomesh-neoforge-26.1-1.2.0.jar"
 
 neoForge {
     version = project.neo_version
+    // Compile-time copy of GeckoLib's own META-INF/interface_injections.json (EntityRenderState implements GeoRenderState). Dev only, not shipped.
+    interfaceInjectionData { from file('src/dev/geckolib_interface_injections.json') }
     runs {
         server {
             server()
@@ -32,6 +34,10 @@ neoForge {
     mods {
         "${mod_id}" { sourceSet(sourceSets.main) }
     }
+    unitTest {
+        enable()
+        testedMod = mods."${mod_id}"
+    }
 }
 
 configurations { runtimeClasspath.extendsFrom localRuntime }
@@ -44,6 +50,7 @@ dependencies {
         compileOnly files(geckomeshJar)
         localRuntime files(geckomeshJar)
     }
+    testImplementation files(geckolibJar)
     testImplementation platform('org.junit:junit-bom:5.11.4')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -71,3 +78,6 @@ neoForge.ideSyncTask generateModMetadata
 
 tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
 tasks.withType(Test).configureEach { useJUnitPlatform() }
+
+// Forward the terminal to the dev server console so commands can be piped in (smoke test).
+tasks.matching { it.name == 'runServer' }.configureEach { standardInput = System.in }
