@@ -37,18 +37,18 @@ public final class ShingleMath {
     private ShingleMath() {}
 
     public record Options(double baseLip, double overlapMargin, double maxLipFraction, double minLip, double maxCutFraction,
-                          double rimPx, double linerInset, boolean liner, double stagger, long seed, boolean tiles, double jitter, int linerColor, double linerMargin) {
+                          double rimPx, double linerInset, boolean liner, double stagger, long seed, boolean offset, double jitter, int linerColor, double linerMargin) {
         /** Plain geometry: no stagger, no tile variation, no jitter (the maths tests of prompts 02 and 03 use this). */
         public static Options defaults(double baseLip, boolean liner) {
             return new Options(baseLip, OVERLAP_MARGIN, MAX_LIP_FRACTION, MIN_LIP, MAX_CUT_FRACTION, RIM_PX, 0.0, liner, 0.0, 0L, false, 0.0, LINER_TINT, LINER_MARGIN);
         }
 
-        public Options withVariety(double stagger, long seed, boolean tiles, double jitter) {
-            return new Options(baseLip, overlapMargin, maxLipFraction, minLip, maxCutFraction, rimPx, linerInset, liner, stagger, seed, tiles, jitter, linerColor, linerMargin);
+        public Options withVariety(double stagger, long seed, boolean offset, double jitter) {
+            return new Options(baseLip, overlapMargin, maxLipFraction, minLip, maxCutFraction, rimPx, linerInset, liner, stagger, seed, offset, jitter, linerColor, linerMargin);
         }
 
         public Options withLinerColor(int color) {
-            return new Options(baseLip, overlapMargin, maxLipFraction, minLip, maxCutFraction, rimPx, linerInset, liner, stagger, seed, tiles, jitter, color, linerMargin);
+            return new Options(baseLip, overlapMargin, maxLipFraction, minLip, maxCutFraction, rimPx, linerInset, liner, stagger, seed, offset, jitter, color, linerMargin);
         }
     }
 
@@ -69,6 +69,10 @@ public final class ShingleMath {
         public double linerInsetMin = Double.POSITIVE_INFINITY;
         /** Per ring: deepest plate, lip or rim vertex radius (local radial), and the radius of the liner at joint j. */
         public double[] deepest, linerRadius, ringDelta;
+        /** Texture offset in pixels (0..15) of each ring. */
+        public int[] offsetPx;
+        /** Liner ring of vertices at each joint (null where not built), shared by the two neighbouring liner segments. */
+        public double[][][] linerJoint;
         public double maxGap = Double.NEGATIVE_INFINITY, minGap = Double.POSITIVE_INFINITY;
         public int uncovered;       // vertices where gap + margin exceeded the maximum lip (only the liner closes those)
         public int cutVertices;     // vertices where the skin trailing edge was shortened
@@ -183,21 +187,28 @@ public final class ShingleMath {
             cutAt[j - 1] = new double[][]{cut};
         }
 
+        // texture offsets: one integer pixel offset per whole ring (skin, lips, rims and liner of the ring move together)
+        int[] offPx = o.offset() ? Stagger.ringOffsetsPx(o.seed(), segs) : new int[segs];
+        res.offsetPx = offPx;
+
         // pass 2: plates
         for (int k = Math.max(0, from); k <= Math.min(segs - 1, to); k++) {
             double[][] f = c.frame[k];
             double dk = res.ringDelta[k];
+            float shift = offPx[k] / 16f;
             for (int s = 0; s < per; s++) {
                 boolean last = s == per - 1 && k < segs - 1;
                 double[] lipL = last ? lipAt[k][0] : null, cutL = last ? cutAt[k][0] : null;
                 double u0 = s * pitch;
                 double[][] front = new double[n][], rear = new double[n][], lipEnd = new double[n][];
                 double[][] lipRim = new double[n][], leadEnd = new double[n][];
+                double[] lipLen = new double[n];
                 for (int i = 0; i < n; i++) {
                     double a = 2 * Math.PI * i / n + dk, sa = Math.sin(a), ca = Math.cos(a);
                     double uRear = skin * cos - (cutL == null ? 0 : cutL[i]);
                     double rRear = r0 + uRear * tan;
                     double L = lipL == null ? o.baseLip() : lipL[i];
+                    lipLen[i] = L;
                     front[i] = world(c, k, f, sa, ca, r0, u0);
                     rear[i] = world(c, k, f, sa, ca, rRear, u0 + uRear);
                     double rl = rRear - L * cos, ul = uRear + L * sin;
@@ -212,23 +223,27 @@ public final class ShingleMath {
                 }
                 double[] tail = ChainMath.apply(f, new double[]{0, 0, -1});
                 double[] head = {-tail[0], -tail[1], -tail[2]};
+                float rw = (float) rimW;
                 for (int i = 0; i < n; i++) {
                     int jn = (i + 1) % n;
                     double am = 2 * Math.PI * (i + 0.5) / n + dk;
                     double[] radial = ChainMath.apply(f, new double[]{Math.sin(am), Math.cos(am), 0});
-                    int o8 = Stagger.orientation(o.seed(), k, i, Stagger.SALT_ORIENT, o.tiles());
                     res.curColor = Stagger.scale(WHITE, Stagger.jitterFactor(o.seed(), k, i, Stagger.SALT_JITTER, o.jitter()));
-                    res.add(SKIN, new double[][]{front[i], front[jn], rear[jn], rear[i]}, uv(o8, 0f, 1f), radial);
-                    res.add(LIP, new double[][]{rear[i], rear[jn], lipEnd[jn], lipEnd[i]}, uv(o8, 0f, ScaleMath.LIP_V), tail);
+                    float li = (float) lipLen[i], lj = (float) lipLen[jn];
+                    // the skin shows one tile; a lip or rim samples only its own slice at tile scale: one block of length = one tile,
+                    // so its height in tiles equals its height in blocks (the lip continues the tile past the skin's trailing edge:
+                    // rows 0..L, the cyclic continuation of the skin), never the whole tile stretched over the strip
+                    res.add(SKIN, new double[][]{front[i], front[jn], rear[jn], rear[i]}, uv(shift, 0f, 0f, 1f, 1f), radial);
+                    res.add(LIP, new double[][]{rear[i], rear[jn], lipEnd[jn], lipEnd[i]}, uv(shift, 0f, 0f, lj, li, rear[i], rear[jn], lipEnd[i], lipEnd[jn]), tail);
                     if (o.rimPx() > 0) {
-                        res.add(RIM_LIP, new double[][]{lipEnd[i], lipEnd[jn], lipRim[jn], lipRim[i]}, uv(o8, ScaleMath.LIP_V, (float) (ScaleMath.LIP_V + rimW)), tail);
-                        res.add(RIM_SKIN, new double[][]{front[i], front[jn], leadEnd[jn], leadEnd[i]}, uv(o8, 0f, (float) rimW), head);
+                        res.add(RIM_LIP, new double[][]{lipEnd[i], lipEnd[jn], lipRim[jn], lipRim[i]}, uv(shift, li, lj, lj + rw, li + rw, lipEnd[i], lipEnd[jn], lipRim[i], lipRim[jn]), tail);
+                        res.add(RIM_SKIN, new double[][]{front[i], front[jn], leadEnd[jn], leadEnd[i]}, uv(shift, 0f, 0f, rw, rw, front[i], front[jn], leadEnd[i], leadEnd[jn]), head);
                     }
                 }
             }
         }
 
-        // liner: closed mitre-ring loft right under the skin. Per ring its radius is the deepest plate, lip or rim vertex of that
+        // liner: closed loft right under the skin. Per ring its radius is the deepest plate, lip or rim vertex of that
         // ring minus a small margin (no fixed floor); at a joint it is the smaller of the two neighbouring rings.
         double[] rad = new double[segs + 1];
         Arrays.fill(rad, r0 - 0.25);
@@ -244,17 +259,21 @@ public final class ShingleMath {
             res.linerInsetMin = Math.min(res.linerInsetMin, r0 - rad[j]);
         }
         if (o.liner()) {
-            ChainMath liner = c.withRadius(rad);
+            // one ring of vertices per joint, shared by the liner segments on both sides (never rotated per ring)
+            double ph = Math.PI / n;   // the liner seams sit half a face away from the plate edges
+            double[][][] joint = new double[segs + 1][][];
+            res.linerJoint = joint;
             for (int k = Math.max(0, from); k <= Math.min(segs - 1, to); k++) {
-                double ph = Math.PI / n + res.ringDelta[k];   // the liner turns with its ring and keeps its half-face turn against the plates
-                double[][] fr = liner.miterRing(k, false, n, ph), rr = liner.miterRing(k + 1, true, n, ph);
+                if (joint[k] == null) joint[k] = jointRing(c, k, n, rad[k], ph);
+                if (joint[k + 1] == null) joint[k + 1] = jointRing(c, k + 1, n, rad[k + 1], ph);
+                double[][] fr = joint[k], rr = joint[k + 1];
+                float shift = ((offPx[k] + (o.offset() ? 8 : 0)) % 16) / 16f;   // the liner is half a tile away from its ring's plates
                 for (int i = 0; i < n; i++) {
                     int jn = (i + 1) % n;
                     double am = 2 * Math.PI * (i + 0.5) / n + ph;
                     double[] radial = ChainMath.apply(c.frame[k], new double[]{Math.sin(am), Math.cos(am), 0});
-                    int o8 = Stagger.orientation(o.seed(), k, i, Stagger.SALT_LINER_ORIENT, o.tiles());
                     res.curColor = Stagger.scale(o.linerColor(), Stagger.jitterFactor(o.seed(), k, i, Stagger.SALT_LINER_JITTER, o.jitter()));
-                    res.add(LINER, new double[][]{fr[i], fr[jn], rr[jn], rr[i]}, uv(o8, 0f, 1f), radial);
+                    res.add(LINER, new double[][]{fr[i], fr[jn], rr[jn], rr[i]}, uv(shift, 0f, 0f, 1f, 1f), radial);
                 }
             }
         }
@@ -262,20 +281,57 @@ public final class ShingleMath {
         return res;
     }
 
+    /**
+     * The liner ring at joint j: n points on a circle of radius r in the mitre plane (the plane that bisects the two axes),
+     * built once and used by both neighbouring liner segments, so the liner is watertight at every joint.
+     */
+    public static double[][] jointRing(ChainMath c, int j, int n, double r, double phase) {
+        int a = Math.max(0, j - 1), b = Math.min(c.segments - 1, j);
+        double[] a1 = c.axis(a), a2 = c.axis(b);
+        double[] bis = {a1[0] + a2[0], a1[1] + a2[1], a1[2] + a2[2]};
+        double bl = Math.sqrt(dot(bis, bis));
+        double[] nrm = bl < 1e-9 ? a1 : new double[]{bis[0] / bl, bis[1] / bl, bis[2] / bl};
+        double[] x = ChainMath.apply(c.frame[b], new double[]{1, 0, 0}), y = ChainMath.apply(c.frame[b], new double[]{0, 1, 0});
+        x = unit(project(x, nrm));
+        y = unit(project(y, nrm));
+        double xy = dot(x, y);
+        y = unit(new double[]{y[0] - x[0] * xy, y[1] - x[1] * xy, y[2] - x[2] * xy});
+        double[][] ring = new double[n][];
+        for (int i = 0; i < n; i++) {
+            double ang = 2 * Math.PI * i / n + phase, sa = Math.sin(ang), ca = Math.cos(ang);
+            ring[i] = new double[]{c.center[j][0] + r * (sa * x[0] + ca * y[0]), c.center[j][1] + r * (sa * x[1] + ca * y[1]), c.center[j][2] + r * (sa * x[2] + ca * y[2])};
+        }
+        return ring;
+    }
+
+    private static double[] project(double[] v, double[] nrm) {
+        double d = dot(v, nrm);
+        return new double[]{v[0] - nrm[0] * d, v[1] - nrm[1] * d, v[2] - nrm[2] * d};
+    }
+
+    private static double[] unit(double[] v) {
+        double l = Math.sqrt(dot(v, v));
+        return new double[]{v[0] / l, v[1] / l, v[2] / l};
+    }
+
     private static double[] world(ChainMath c, int k, double[][] f, double sa, double ca, double r, double u) {
         double[] l = ChainMath.apply(f, new double[]{r * sa, r * ca, -u});
         return new double[]{c.center[k][0] + l[0], c.center[k][1] + l[1], c.center[k][2] + l[2]};
     }
 
-    /** UV corners of a face (in the order front i, front i+1, rear i+1, rear i) inside one tile, in orientation o of the 8 tile orientations. */
-    public static float[][] uv(int o, float v0, float v1) {
-        float[][] st = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
-        float[][] out = new float[4][];
-        for (int q = 0; q < 4; q++) {
-            float[] r = Stagger.orient(o, st[q][0], st[q][1]);
-            out[q] = new float[]{r[0], v0 + r[1] * (v1 - v0)};
-        }
-        return out;
+    /**
+     * UV corners of a face in the order (near edge i, near edge i+1, far edge i+1, far edge i). u runs one tile along the
+     * face, starting at the ring's texture offset (shift, in tiles; the sampler repeats, see the report); v is the distance
+     * from the strip's near edge in tiles (one block = one tile) with its own value per vertex.
+     */
+    public static float[][] uv(float shift, float vNearI, float vNearJ, float vFarJ, float vFarI) {
+        return new float[][]{{shift, vNearI}, {shift + 1f, vNearJ}, {shift + 1f, vFarJ}, {shift, vFarI}};
+    }
+
+    /** As above, but u runs for the real length (in blocks = tiles) of the strip's near and far edge, so a lip or rim keeps tile scale along its length too. */
+    public static float[][] uv(float shift, float vNearI, float vNearJ, float vFarJ, float vFarI, double[] nearI, double[] nearJ, double[] farI, double[] farJ) {
+        float un = (float) Math.sqrt(dot(sub(nearJ, nearI), sub(nearJ, nearI))), uf = (float) Math.sqrt(dot(sub(farJ, farI), sub(farJ, farI)));
+        return new float[][]{{shift, vNearI}, {shift + un, vNearJ}, {shift + uf, vFarJ}, {shift, vFarI}};
     }
 
     private static double[] sub(double[] a, double[] b) { return new double[]{a[0] - b[0], a[1] - b[1], a[2] - b[2]}; }

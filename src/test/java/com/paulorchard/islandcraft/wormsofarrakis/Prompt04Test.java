@@ -238,19 +238,10 @@ class Prompt04Test {
         }
     }
 
-    @Test void allEightOrientationsOccurAndUvStaysInTheTile() {
+    @Test void jitterStaysWithinBounds() {
         int n = 50;
         double r = WormMath.circumradius(n, 1.0);
         ShingleMath.Result res = ShingleMath.build(curve(16, 12, 4, 1, 0), n, r, 1, opt(1.0, 5, true, 0.04));
-        boolean[] seen = new boolean[8];
-        for (int k = 0; k < 12; k++) for (int i = 0; i < n; i++) seen[Stagger.orientation(5, k, i, Stagger.SALT_ORIENT, true)] = true;
-        for (boolean s : seen) assertTrue(s);
-        for (int q = 0; q < res.quads; q++) for (int k = 0; k < 4; k++) {
-            float u = res.v[q * 32 + k * 8 + 3], v = res.v[q * 32 + k * 8 + 4];
-            assertTrue(u >= 0 && u <= 1 && v >= 0 && v <= 1, "uv " + u + "," + v);
-        }
-        // tiles off: every face in orientation 0
-        for (int k = 0; k < 12; k++) assertEquals(0, Stagger.orientation(5, k, 3, Stagger.SALT_ORIENT, false));
         // jitter stays in 1 +- 0.04 and never above the maximum
         for (int q = 0; q < res.quads; q++) {
             int c = res.color[q];

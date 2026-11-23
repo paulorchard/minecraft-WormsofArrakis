@@ -59,7 +59,7 @@ public final class WormPose {
     static double behind(PlanarPath path, double s, double[] from, double pitch) {
         double lo = pitch, hi = pitch * 1.6;
         while (dist(path, s - hi, from) < pitch && hi < pitch * 8) hi *= 1.6;
-        for (int i = 0; i < 60; i++) {
+        for (int i = 0; i < 46; i++) {
             double mid = 0.5 * (lo + hi);
             if (dist(path, s - mid, from) < pitch) lo = mid; else hi = mid;
         }
@@ -70,7 +70,7 @@ public final class WormPose {
     public static double ahead(PlanarPath path, double s, double[] from, double distance) {
         double lo = distance, hi = distance * 1.6;
         while (dist(path, s + hi, from) < distance && hi < distance * 8) hi *= 1.6;
-        for (int i = 0; i < 60; i++) {
+        for (int i = 0; i < 46; i++) {
             double mid = 0.5 * (lo + hi);
             if (dist(path, s + mid, from) < distance) lo = mid; else hi = mid;
         }

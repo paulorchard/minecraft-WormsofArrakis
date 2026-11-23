@@ -6,7 +6,7 @@ package com.paulorchard.islandcraft.wormsofarrakis.geometry;
  * the pattern stays with the segment while the worm moves.
  */
 public final class Stagger {
-    public static final int SALT_ROTATION = 1, SALT_ORIENT = 2, SALT_JITTER = 3, SALT_LINER_ORIENT = 4, SALT_LINER_JITTER = 5, SALT_FLAP = 6;
+    public static final int SALT_ROTATION = 1, SALT_OFFSET = 2, SALT_JITTER = 3, SALT_LINER_JITTER = 5, SALT_FLAP = 6;
 
     private Stagger() {}
 
@@ -44,17 +44,26 @@ public final class Stagger {
         return stagger == 0 ? 0 : offsets(seed, k + 1)[k] * stagger * (2 * Math.PI / n);
     }
 
-    /** One of the 8 orientations of a square tile (bit 0 flip s, bit 1 flip t, bit 2 swap), 0 when tiles are off. */
-    public static int orientation(long seed, int k, int i, int salt, boolean tiles) {
-        return tiles ? (int) (u(seed, k, i, salt) * 8) & 7 : 0;
-    }
-
-    /** Applies an orientation to normalised tile coordinates (s, t) in [0, 1]; the result stays in [0, 1]. */
-    public static float[] orient(int o, float s, float t) {
-        if ((o & 4) != 0) { float x = s; s = t; t = x; }
-        if ((o & 1) != 0) s = 1f - s;
-        if ((o & 2) != 0) t = 1f - t;
-        return new float[]{s, t};
+    /**
+     * Texture offset in pixels (0..15) along the circumferential axis of the tile, one per ring. Even rings (the head ring is ring 0)
+     * are mapped normally (0); every odd ring gets a seeded offset in 1..15 that differs from the previous odd ring's by at least
+     * 2 pixels (mod 16). A pure function of (seed, ring index).
+     */
+    public static int[] ringOffsetsPx(long seed, int count) {
+        int[] o = new int[count];
+        int prev = -1;
+        for (int k = 1; k < count; k += 2) {
+            int v;
+            if (prev < 0) v = 1 + (int) (u(seed, k, 0, SALT_OFFSET) * 15) % 15;
+            else {
+                int d = 2 + (int) (u(seed, k, 0, SALT_OFFSET) * 13) % 13;   // 2..14
+                v = (prev + d) % 16;
+                if (v == 0) { d = d < 14 ? d + 1 : d - 1; v = (prev + d) % 16; }
+            }
+            o[k] = v;
+            prev = v;
+        }
+        return o;
     }
 
     /** Colour multiplier 1 +- jitter for a face. */

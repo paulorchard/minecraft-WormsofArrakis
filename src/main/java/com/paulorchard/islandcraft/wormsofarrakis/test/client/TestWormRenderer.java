@@ -111,7 +111,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
     }
 
     private static ShingleMath.Options visual(ShingleMath.Options base, int entityId) {
-        return base.withVariety(TestFlags.stagger, seedFor(entityId), TestFlags.tiles, TestFlags.jitter);
+        return base.withVariety(TestFlags.stagger, seedFor(entityId), TestFlags.offset, TestFlags.jitter);
     }
 
     private static SurfaceProvider surfaceFor(EntityRenderState state) {
@@ -161,9 +161,9 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
             if (!sig.equals(LAST_MOVE_LOG)) {
                 LAST_MOVE_LOG = sig;
                 ShingleMath.Result x = c.skin.result;
-                WormsOfArrakis.LOGGER.info("[WormsOfArrakis] path {}: width={} segments={} built segments {}..{} quads={} (liner/skin/lip/rims {}/{}/{}/{}) of which head flaps {}, HEAD_LENGTH={}, stagger={} seed={} tiles={} jitter={}, liner inset {}..{}",
+                WormsOfArrakis.LOGGER.info("[WormsOfArrakis] path {}: width={} segments={} built segments {}..{} quads={} (liner/skin/lip/rims {}/{}/{}/{}) of which head flaps {}, HEAD_LENGTH={}, stagger={} seed={} offset={} jitter={}, liner inset {}..{}",
                         spec.mode(), m.width, m.segments, c.skin.from, c.skin.to, x.quads, x.byKind[0], x.byKind[1], x.byKind[2], x.byKind[3] + x.byKind[4], c.skin.flapQuads,
-                        String.format("%.2f", HeadSpec.headLength(m.width)), TestFlags.stagger, seedFor(id), TestFlags.tiles, TestFlags.jitter,
+                        String.format("%.2f", HeadSpec.headLength(m.width)), TestFlags.stagger, seedFor(id), TestFlags.offset, TestFlags.jitter,
                         String.format("%.3f", x.linerInsetMin), String.format("%.3f", x.linerInsetUsed));
             }
         }

@@ -40,6 +40,7 @@ public final class MoveFactory {
                 yield Moves.crest(width, segs, s.p(2, 0.4), up, s.p(6, 0) > 0 ? s.p(6, 0) : up, s.p(4, 12), force);
             }
             case "emerge" -> Moves.emerge(width, segs, (int) s.p(2, 10), s.p(3, 90), s.p(4, 12), s.p(5, 2), s.p(14, 1.0), force);
+            case "proj" -> Moves.projectile(width, segs, s.p(2, 2.5), s.p(3, 40), s.p(6, 12), s.p(14, 1.0), force);
             case "crash" -> Moves.crash(width, segs, (int) s.p(2, 10), s.p(3, 70), s.p(4, 12), s.p(6, 12), s.p(7, 4), s.p(15, 1.0), s.p(14, 1.0),
                     s.p(9, 1) > 0, force);
             default -> throw new Moves.Rejected("unknown move " + s.mode());

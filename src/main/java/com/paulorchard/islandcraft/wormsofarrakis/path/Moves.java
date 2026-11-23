@@ -31,6 +31,9 @@ public final class Moves {
         public double apexY, tunnelDepth, topRadius, radiusDown, underRadius;
         public double entryAngle = Double.NaN, exitAngle = Double.NaN, exposedLength = Double.NaN;
         public String note = "";
+        // projectile crash (mode proj)
+        public double gravity, v0, angleDeg, angleRequested, flightTime, range, paraLength;
+        public int segmentsNeeded, exposedMax;
         public double[] tTab, sTab;      // crash: ballistic time table
         public double advanceTime, cycle;
 
@@ -192,6 +195,96 @@ public final class Moves {
             m.exitAngle = -Math.toDegrees(p.theta(sOut));
             m.exposedLength = sOut - sIn;
         }
+        return m;
+    }
+
+    public static final double MAX_APEX = 6.0;
+    public static final double DEFAULT_APEX = 2.5, DEFAULT_ANGLE = 40, DEFAULT_GRAVITY = 12;
+
+    /** Largest launch angle (degrees) for an apex (body widths): the radius at the apex 2H / tan^2(a) must be at least the bend limit. */
+    public static double maxProjectileAngle(double apexWidths) {
+        return Math.toDegrees(Math.atan(Math.sqrt(apexWidths / (BendLimit.MIN_BEND_RADIUS_WIDTHS / 2.0))));
+    }
+
+    /**
+     * Crash as a projectile: the head follows a parabola launched from the surface hole at angleDeg, reaching apexWidths x width
+     * above the base level, under the worm's own gravity (blocks per second squared); the body follows the head's trail. The
+     * speed along the path is physical, v^2 = v0^2 - 2 g y (v0 underground), so the head slows to v0 cos(a) at the top.
+     */
+    public static Move projectile(double width, int segments, double apexWidths, double angleDeg, double gravity, double underRadiusWidths, boolean force) {
+        if (apexWidths <= 0) throw new Rejected("apex must be above 0");
+        if (apexWidths > MAX_APEX + 1e-9 && !force) throw new Rejected("apex must be at most " + MAX_APEX + " body widths; use force");
+        if (gravity <= 0) throw new Rejected("gravity must be above 0");
+        if (angleDeg < 5 || angleDeg > 85) throw new Rejected("angle must be between 5 and 85 degrees");
+        double H = apexWidths * width;
+        double aMax = maxProjectileAngle(apexWidths), angle = angleDeg;
+        String note = "";
+        if (angle > aMax + 1e-9 && !force) {
+            angle = aMax;
+            note = String.format(java.util.Locale.ROOT, "angle %.1f is above the largest allowed %.1f degrees for apex %.2f (the radius at the top would be under %.1f body widths); clamped to %.1f (add force to build it anyway)",
+                    angleDeg, aMax, apexWidths, BendLimit.MIN_BEND_RADIUS_WIDTHS, angle);
+        }
+        double a = Math.toRadians(angle);
+        double v0 = Math.sqrt(2 * gravity * H) / Math.sin(a);
+        double k = gravity / (v0 * v0 * Math.cos(a) * Math.cos(a));
+        Move m = new Move();
+        common(m, "proj", width, segments, 0, v0);
+        m.nominalSpeed = m.speed = v0;
+        m.gravity = gravity;
+        m.v0 = v0;
+        m.angleDeg = angle;
+        m.angleRequested = angleDeg;
+        m.note = note;
+        m.flightTime = 2 * v0 * Math.sin(a) / gravity;
+        m.range = 4 * H / Math.tan(a);
+        m.topRadius = 2 * H / (Math.tan(a) * Math.tan(a));
+        double ur = underRadiusWidths * width;
+        m.underRadius = ur;
+        double depth = ascentDepth(width, m.r0, angle, ur);
+        double yEnd = depth + ur * (1 - Math.cos(a));
+        double straightBelow = -yEnd / Math.sin(a);
+        double yDown = Math.min(-(width + m.r0) * Math.sin(a), -(m.r0 + 2.0) + ur * (1 - Math.cos(a)));
+        double descentLen = -yDown / Math.sin(a);
+        PlanarPath p = PlanarPath.start(0, depth, 0).line(TUNNEL_LEAD).arc(ur, angle).line(straightBelow).parabola(k).line(descentLen).arc(ur, angle).line(20).build();
+        m.path = p;
+        m.tunnelDepth = depth;
+        m.sCross1 = TUNNEL_LEAD + ur * a + straightBelow;
+        PlanarPath.Prim para = null;
+        for (PlanarPath.Prim q : p.prims()) if (q.isPara()) para = q;
+        m.paraLength = para.len();
+        m.sCross2 = m.sCross1 + para.len();
+        m.sTurn = m.sCross1 + para.len() / 2;
+        m.apexY = p.pos(m.sTurn)[1];
+        m.segmentsNeeded = (int) Math.ceil(para.len()) + 2;
+        if (segments < m.segmentsNeeded && !force) {
+            throw new Rejected(String.format(java.util.Locale.ROOT, "the worm is too short for this flight: it needs at least %d segments (the flight is %.1f blocks long) to keep its tail under the sand at both holes; add force to build it anyway", m.segmentsNeeded, para.len()));
+        }
+        m.sEnd = m.sCross2 + segments + HeadSpec.headLength(width) + 2 * m.r0 + (m.r0 + 1.2) / Math.sin(a) + 4;
+        m.hold = 0;
+        double v0sq = v0 * v0, vTop = v0 * Math.cos(a);
+        int cnt = (int) Math.ceil((m.sEnd - m.s0) / 0.25);
+        m.tTab = new double[cnt + 2];
+        m.sTab = new double[cnt + 2];
+        double t = 0;
+        for (int i = 0; i <= cnt; i++) {
+            double s = m.s0 + 0.25 * i;
+            m.tTab[i] = t;
+            m.sTab[i] = s;
+            double y = p.pos(s + 0.125)[1];
+            double v = y <= 0 ? v0 : Math.sqrt(Math.max(v0sq - 2 * gravity * y, vTop * vTop));
+            t += 0.25 / v;
+        }
+        m.tTab[cnt + 1] = t + 1e-6;
+        m.sTab[cnt + 1] = m.s0 + 0.25 * (cnt + 1);
+        m.sEnd = m.sTab[cnt];
+        m.advanceTime = m.tTab[cnt];
+        m.cycle = m.advanceTime + CRASH_PAUSE;
+        // most body rings above the base level: scan the flight coarsely and the landing finely (the maximum is around the landing)
+        int best = 0;
+        double step = Math.max(0.5, para.len() / 40);
+        for (double s = m.sCross1; s <= m.sCross2 + m.r0 + 12; s += step) best = Math.max(best, m.pose(s).exposedBody(0));
+        for (double s = m.sCross2 - 4; s <= m.sCross2 + 4; s += 0.25) best = Math.max(best, m.pose(s).exposedBody(0));
+        m.exposedMax = best;
         return m;
     }
 
