@@ -33,6 +33,19 @@ public final class ChainMath {
         center[segments] = c;
     }
 
+    private ChainMath(ChainMath o, double[] radius) {
+        this.segments = o.segments;
+        this.length = o.length;
+        this.center = o.center;
+        this.frame = o.frame;
+        this.radius = radius;
+    }
+
+    /** Same spine and frames, different ring radii (the liner uses this). */
+    public ChainMath withRadius(double[] radius) {
+        return new ChainMath(this, radius);
+    }
+
     public double[] axis(int k) {
         return apply(frame[k], new double[]{0, 0, -1});
     }

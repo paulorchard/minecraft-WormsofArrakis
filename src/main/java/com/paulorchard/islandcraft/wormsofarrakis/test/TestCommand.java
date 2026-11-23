@@ -48,7 +48,18 @@ final class TestCommand {
                 new Arg("bend", DoubleArgumentType.doubleArg(-90, 90)), new Arg("pitch", DoubleArgumentType.doubleArg(-90, 90)),
                 new Arg("seglen", DoubleArgumentType.doubleArg(0.25, 64)), new Arg("closer", StringArgumentType.word()),
                 new Arg("taper", DoubleArgumentType.doubleArg(0.5, 1.5)), new Arg("per", IntegerArgumentType.integer(1, 16)),
-                new Arg("lip", DoubleArgumentType.doubleArg(0.0, 1.0)))));
+                new Arg("lip", DoubleArgumentType.doubleArg(0.0, 1.0)), new Arg("liner", StringArgumentType.word()))));
+        // curve <width> <segments> <radius_widths> [plane horizontal|vertical|diagonal] [per]
+        root.then(branch("curve", 3, List.of(w("width"), new Arg("segments", IntegerArgumentType.integer(1, 400)),
+                new Arg("radius_widths", DoubleArgumentType.doubleArg(0.25, 64)), new Arg("plane", StringArgumentType.word()),
+                new Arg("per", IntegerArgumentType.integer(1, 16)))));
+        root.then(Commands.literal("stats").then(Commands.argument("state", StringArgumentType.word()).executes(ctx -> {
+            String st = StringArgumentType.getString(ctx, "state");
+            TestFlags.stats = st.equals("on");
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] stats {}", TestFlags.stats ? "on (log line every 5 s from the client renderer)" : "off");
+            ctx.getSource().sendSuccess(() -> Component.literal("stats " + (TestFlags.stats ? "on" : "off")), true);
+            return 1;
+        })));
         root.then(branch("wave", 2, List.of(w("width"), new Arg("segments", IntegerArgumentType.integer(1, 400)),
                 new Arg("amplitude", DoubleArgumentType.doubleArg(0, 45)), new Arg("seglen", DoubleArgumentType.doubleArg(0.25, 64)),
                 new Arg("closer", StringArgumentType.word()))));
@@ -132,9 +143,28 @@ final class TestCommand {
                 int segs = (int) num(ctx, args, "segments", 12);
                 String closer = str(ctx, "closer", "lip");
                 double per = num(ctx, args, "per", 1);
-                if (closer.equals("scale")) seglen = per;
+                if (closer.equals("scale") || closer.equals("shingle")) seglen = per;
+                double liner = str(ctx, "liner", "on").equals("off") ? 0 : 1;
                 spec = WormSpec.of("chain", closer, width, segs, num(ctx, args, "bend", 0),
-                        num(ctx, args, "pitch", 0), seglen, num(ctx, args, "taper", 1), per, num(ctx, args, "lip", 0.132));
+                        num(ctx, args, "pitch", 0), seglen, num(ctx, args, "taper", 1), per, num(ctx, args, "lip", 0.132), liner);
+                reach = width / 2 + 6;
+            }
+            case "curve" -> {
+                int segs = (int) num(ctx, args, "segments", 40);
+                double rw = num(ctx, args, "radius_widths", 2);
+                String plane = str(ctx, "plane", "horizontal");
+                int per = (int) num(ctx, args, "per", 1);
+                if (!List.of("horizontal", "vertical", "diagonal").contains(plane)) {
+                    ctx.getSource().sendFailure(Component.literal("plane: horizontal|vertical|diagonal"));
+                    return 0;
+                }
+                // constant curvature: angle per joint = segment length / radius of curvature (radius = rw body widths)
+                double deg = Math.toDegrees(per / (rw * width));
+                double yaw = plane.equals("vertical") ? 0 : plane.equals("diagonal") ? deg / Math.sqrt(2) : deg;
+                double pitch = plane.equals("horizontal") ? 0 : plane.equals("diagonal") ? deg / Math.sqrt(2) : deg;
+                spec = WormSpec.of("chain", "shingle", width, segs, yaw, pitch, per, 1, per, 0.132, 1);
+                WormsOfArrakis.LOGGER.info("[WormsOfArrakis] curve: width={} segments={} radius={} widths ({} blocks) plane={} => {} deg per joint (yaw {}, pitch {})",
+                        width, segs, rw, rw * width, plane, String.format(Locale.ROOT, "%.3f", deg), String.format(Locale.ROOT, "%.3f", yaw), String.format(Locale.ROOT, "%.3f", pitch));
                 reach = width / 2 + 6;
             }
             case "wave" -> {

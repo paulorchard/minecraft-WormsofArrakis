@@ -9,6 +9,8 @@ import com.mojang.math.Axis;
 import com.paulorchard.islandcraft.wormsofarrakis.WormsOfArrakis;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.ChainMath;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.Frustum;
+import com.paulorchard.islandcraft.wormsofarrakis.geometry.ScaleMath;
+import com.paulorchard.islandcraft.wormsofarrakis.geometry.ShingleMath;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.WormMath;
 import com.paulorchard.islandcraft.wormsofarrakis.test.TestAnim;
 import com.paulorchard.islandcraft.wormsofarrakis.test.TestWormEntity;
@@ -38,6 +40,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
     static final DataTicket<String> SPEC = DataTicket.create("arrakis_spec", String.class);
     static final DataTicket<Float> YAW = DataTicket.create("arrakis_yaw", Float.class);
     static final DataTicket<Double> AGE = DataTicket.create("arrakis_age", Double.class);
+    static final DataTicket<Integer> ID = DataTicket.create("arrakis_id", Integer.class);
 
     private static final Map<String, Double> REACH = new HashMap<>();
 
@@ -50,6 +53,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
         state.addGeckolibData(SPEC, entity.getSpecString());
         state.addGeckolibData(YAW, entity.getYRot());
         state.addGeckolibData(AGE, entity.tickCount + (double) partialTick);
+        state.addGeckolibData(ID, entity.getId());
     }
 
     /** Back faces culled (entityCutoutCull): the faces are one-sided, nothing shows from inside the tube. */
@@ -106,6 +110,10 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
             submitLoft(spec, state, poseStack, collector);
             return;
         }
+        if ((spec.kind().equals("chain") || spec.kind().equals("wave")) && spec.mode().equals("shingle")) {
+            submitShingle(spec, state, poseStack, collector);
+            return;
+        }
         super.submit(state, poseStack, collector, camera);
     }
 
@@ -151,4 +159,81 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
     }
 
     private static boolean LOGGED_LOFT;
+
+    private static final class Cached {
+        String key;
+        double[] yaw, pitch;
+        ShingleMath.Result res;
+    }
+
+    private static final Map<Integer, Cached> CACHE = new HashMap<>();
+    private static boolean LOGGED_SHINGLE;
+
+    /**
+     * Prompt 02 skin: liner + plates with telescoping lips + rims, built from the chain frames by ShingleMath and drawn
+     * with submitCustomGeometry. The built geometry is reused when no bone pose changed since the last frame.
+     */
+    private void submitShingle(WormSpec spec, EntityRenderState state, PoseStack poseStack, SubmitNodeCollector collector) {
+        int n = WormModels.faces(spec);
+        double r = WormMath.circumradius(n, WormMath.FACE_WIDTH);
+        int segs = (int) spec.p(1, 12);
+        int per = Math.max(1, (int) spec.p(6, 1));
+        double base = spec.p(7, ScaleMath.LIP_LENGTH);
+        boolean liner = spec.p(8, 1) > 0;
+        double[][] a = TestAnim.angles(spec, state.getGeckolibData(AGE));
+        Integer id = state.getGeckolibData(ID);
+        Cached c = CACHE.get(id);
+        String key = spec.serialize();
+        boolean rebuild = c == null || !key.equals(c.key) || !java.util.Arrays.equals(c.yaw, a[0]) || !java.util.Arrays.equals(c.pitch, a[1]);
+        long t0 = System.nanoTime();
+        if (rebuild) {
+            double[] radius = new double[segs + 1];
+            java.util.Arrays.fill(radius, r);
+            ChainMath chain = new ChainMath(segs, per * ScaleMath.PITCH, r, a[0], a[1], radius);
+            c = new Cached();
+            c.key = key;
+            c.yaw = a[0].clone();
+            c.pitch = a[1].clone();
+            c.res = ShingleMath.build(chain, n, r, per, ShingleMath.Options.defaults(base, liner));
+            if (CACHE.size() > 64) CACHE.clear();
+            CACHE.put(id, c);
+            if (!LOGGED_SHINGLE || !key.equals(LAST_LOGGED)) {
+                LOGGED_SHINGLE = true;
+                LAST_LOGGED = key;
+                ShingleMath.Result x = c.res;
+                WormsOfArrakis.LOGGER.info("[WormsOfArrakis] skin shingle: segments={} perBone={} faces={} liner={} (colour {}, inset {} blocks) quads liner/skin/lip/rimSkin/rimLip={}/{}/{}/{}/{} maxGap={} minGap={} lipBase={} uncoveredVertices={} cutVertices={} intersectionsLeft={}",
+                        segs, per, n, liner ? "on" : "off", Integer.toHexString(ShingleMath.LINER_COLOR), String.format("%.3f", x.linerInsetUsed),
+                        x.byKind[0], x.byKind[1], x.byKind[2], x.byKind[3], x.byKind[4], String.format("%.3f", x.maxGap), String.format("%.3f", x.minGap),
+                        base, x.uncovered, x.cutVertices, x.uncutIntersections);
+            }
+        }
+        long buildNs = System.nanoTime() - t0;
+        ShingleStats.frame(rebuild, buildNs, c.res, segs, n);
+        final ShingleMath.Result res = c.res;
+        int light = state.lightCoords;
+        poseStack.pushPose();
+        poseStack.mulPose(Axis.YP.rotationDegrees(-state.getGeckolibData(YAW)));
+        collector.submitCustomGeometry(poseStack, RenderTypes.entityCutoutCull(TestWormModel.TEXTURE), (pose, buffer) -> {
+            long s0 = System.nanoTime();
+            Matrix4f m = pose.pose();
+            Matrix3f nm = pose.normal();
+            Vector3f out = new Vector3f(), p = new Vector3f();
+            float[] v = res.v;
+            for (int q = 0; q < res.quads; q++) {
+                int b = q * 32;
+                int color = res.kind[q] == ShingleMath.LINER ? ShingleMath.LINER_COLOR : ShingleMath.WHITE;
+                nm.transform(v[b + 5], v[b + 6], v[b + 7], out);
+                for (int k = 0; k < 4; k++) {
+                    int at = b + k * 8;
+                    m.transformPosition(v[at], v[at + 1], v[at + 2], p);
+                    buffer.addVertex(p.x, p.y, p.z, color, v[at + 3], v[at + 4],
+                            net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY, light, out.x, out.y, out.z);
+                }
+            }
+            ShingleStats.submitted(System.nanoTime() - s0);
+        });
+        poseStack.popPose();
+    }
+
+    private static String LAST_LOGGED = "";
 }
