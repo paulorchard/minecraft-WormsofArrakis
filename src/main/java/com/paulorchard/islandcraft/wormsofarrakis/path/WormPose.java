@@ -27,12 +27,12 @@ public final class WormPose {
         this.tailPhi = new double[segments];
     }
 
-    public static WormPose at(PlanarPath path, double sHead, int segments, double pitch) {
+    public static WormPose at(PosCurve path, double sHead, int segments, double pitch) {
         return at(path, sHead, segments, pitch, segments);
     }
 
     /** As {@link #at(PlanarPath, double, int, double)} but only the first {@code limit} segments are computed (the rest repeat the last angle). */
-    public static WormPose at(PlanarPath path, double sHead, int segments, double pitch, int limit) {
+    public static WormPose at(PosCurve path, double sHead, int segments, double pitch, int limit) {
         WormPose w = new WormPose(segments, pitch);
         double s = sHead;
         double[] p = path.pos(s);
@@ -56,7 +56,7 @@ public final class WormPose {
     }
 
     /** Arc length s' < s with |P(s') - from| = pitch (the smallest such arc length behind s). */
-    static double behind(PlanarPath path, double s, double[] from, double pitch) {
+    static double behind(PosCurve path, double s, double[] from, double pitch) {
         double lo = pitch, hi = pitch * 1.6;
         while (dist(path, s - hi, from) < pitch && hi < pitch * 8) hi *= 1.6;
         for (int i = 0; i < 46; i++) {
@@ -67,7 +67,7 @@ public final class WormPose {
     }
 
     /** Arc length s' > s with |P(s') - from| = distance (point ahead of the head, for the rigid head's chord). */
-    public static double ahead(PlanarPath path, double s, double[] from, double distance) {
+    public static double ahead(PosCurve path, double s, double[] from, double distance) {
         double lo = distance, hi = distance * 1.6;
         while (dist(path, s + hi, from) < distance && hi < distance * 8) hi *= 1.6;
         for (int i = 0; i < 46; i++) {
@@ -77,7 +77,7 @@ public final class WormPose {
         return s + 0.5 * (lo + hi);
     }
 
-    private static double dist(PlanarPath path, double s, double[] from) {
+    private static double dist(PosCurve path, double s, double[] from) {
         double[] q = path.pos(s);
         return Math.hypot(q[1] - from[1], q[0] - from[2]);
     }

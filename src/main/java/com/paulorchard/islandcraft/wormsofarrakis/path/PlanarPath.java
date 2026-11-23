@@ -11,7 +11,7 @@ import java.util.List;
  * Pure code, no Minecraft classes. Being planar by type, a path has no yaw and no roll, so the joint angles derived
  * from it are exact; a non-planar path cannot be expressed here (refused by construction).
  */
-public final class PlanarPath {
+public final class PlanarPath implements PosCurve {
     public record Prim(double s0, double len, double x0, double y0, double th0, double curv, double kpar) {
         public Prim(double s0, double len, double x0, double y0, double th0, double curv) { this(s0, len, x0, y0, th0, curv, 0); }
         public boolean isArc() { return curv != 0; }
@@ -33,6 +33,7 @@ public final class PlanarPath {
     public List<Prim> prims() { return prims; }
 
     /** {x, y} at arc length s. */
+    @Override
     public double[] pos(double s) {
         Prim p = find(s);
         double d = s - p.s0();
