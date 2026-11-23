@@ -29,7 +29,7 @@ import java.util.Locale;
 final class TestCommand {
     private record Arg(String name, com.mojang.brigadier.arguments.ArgumentType<?> type) {}
 
-    private static final boolean MOUTH_DISABLED = true;
+    private static final boolean MOUTH_DISABLED = false;
 
     private TestCommand() {}
 

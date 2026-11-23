@@ -25,6 +25,12 @@ neoForge {
         }
         client {
             client()
+            // Dev screenshot harness (prompt 01): -Parrakistest=1 -Pquickplay=localhost:25565 joins a dev server and runs test/client/AutoTest.
+            if (project.hasProperty('quickplay')) programArguments.addAll('--quickPlayMultiplayer', project.property('quickplay'))
+            if (project.hasProperty('arrakistest')) {
+                jvmArguments.add('-Darrakis.autotest=true')
+                programArguments.addAll('--width', '960', '--height', '540', '--username', 'Dev')
+            }
         }
         configureEach {
             systemProperty 'forge.logging.markers', 'REGISTRIES'

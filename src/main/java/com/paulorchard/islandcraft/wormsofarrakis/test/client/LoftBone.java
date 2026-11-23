@@ -24,8 +24,13 @@ import java.util.List;
 final class LoftBone extends GeoBone {
     private final GeoQuad[] quads;
 
+    LoftBone(GeoBone parent, String name, GeoBone[] children, float px, float py, float pz, GeoQuad[] quads) {
+        super(parent, name, children, new com.geckolib.cache.model.GeoLocator[0], px * 16f, py * 16f, pz * 16f, 0f, 0f, 0f);
+        this.quads = quads;
+    }
+
     LoftBone(GeoBone parent, String name, GeoBone[] children, float px, float py, float pz, List<Frustum> frustums, float yOffset) {
-        super(parent, name, children, new com.geckolib.cache.model.GeoLocator[0], px, py, pz, 0f, 0f, 0f);
+        super(parent, name, children, new com.geckolib.cache.model.GeoLocator[0], px * 16f, py * 16f, pz * 16f, 0f, 0f, 0f);
         List<GeoQuad> list = new ArrayList<>();
         for (Frustum f : frustums) {
             for (int i = 0; i < f.n; i++) {

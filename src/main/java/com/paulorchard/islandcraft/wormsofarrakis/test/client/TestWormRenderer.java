@@ -82,6 +82,13 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
     @Override
     public void adjustModelBonesForRender(RenderPassInfo<EntityRenderState> info, BoneSnapshots bones) {
         WormSpec spec = WormSpec.parse(info.renderState().getGeckolibData(SPEC));
+        if (spec.kind().equals("mouth")) {
+            // the frame bones only orient each flap (120 degrees apart); the flaps themselves are moved by the GeckoLib animation
+            for (int j = 0; j < MouthModel.FLAPS; j++) {
+                final float rot = (float) (2 * Math.PI * j / MouthModel.FLAPS);
+                bones.ifPresent("flap_frame_" + j, snap -> snap.setRotation(0f, 0f, rot));
+            }
+        }
         if (spec.kind().equals("chain") || spec.kind().equals("wave")) {
             double[][] a = TestAnim.angles(spec, info.renderState().getGeckolibData(AGE));
             int segs = a[0].length;
