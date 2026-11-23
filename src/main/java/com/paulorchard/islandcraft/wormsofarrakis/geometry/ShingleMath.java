@@ -27,7 +27,8 @@ public final class ShingleMath {
     public static final double LINER_MARGIN = 0.02;      // liner stays this far inside the deepest plate edge
     public static final double RIM_PX = 1.0;
     /** Vertex colour multiplier of the liner (ARGB). */
-    public static final int LINER_COLOR = 0xFF404040;
+    public static final int LINER_TINT = 0xFFC0C0C0;   // about 75% grey: the liner shows the dripstone tiles, the plates stay proud
+    public static final int LINER_DARK = 0xFF404040;   // the old dark liner (flag: liner dark)
     public static final int WHITE = 0xFFFFFFFF;
 
     public static final byte LINER = 0, SKIN = 1, LIP = 2, RIM_SKIN = 3, RIM_LIP = 4;
@@ -98,6 +99,11 @@ public final class ShingleMath {
     }
 
     public static Result build(ChainMath c, int n, double r0, int per, Options o) {
+        return build(c, n, r0, per, o, 0, c.segments - 1);
+    }
+
+    /** Builds only segments from..to (inclusive); gaps are computed for the joints around them from the full chain. */
+    public static Result build(ChainMath c, int n, double r0, int per, Options o, int from, int to) {
         Result res = new Result();
         double tilt = Math.toRadians(ScaleMath.TILT_DEG), tan = Math.tan(tilt), sin = Math.sin(tilt), cos = Math.cos(tilt);
         double skin = ScaleMath.SKIN_LENGTH, pitch = ScaleMath.PITCH;
@@ -110,7 +116,7 @@ public final class ShingleMath {
 
         // pass 1: per-joint gaps, lips, cuts
         double[][][] lipAt = new double[segs][][], cutAt = new double[segs][][];
-        for (int j = 1; j < segs; j++) {
+        for (int j = Math.max(1, from); j <= Math.min(segs - 1, to + 1); j++) {
             double[] g = jointGap(c, j, n, r0);
             res.gap[j] = g;
             double[] lip = new double[n], cut = new double[n];
@@ -135,7 +141,7 @@ public final class ShingleMath {
         }
 
         // pass 2: plates
-        for (int k = 0; k < segs; k++) {
+        for (int k = Math.max(0, from); k <= Math.min(segs - 1, to); k++) {
             double[][] f = c.frame[k];
             for (int s = 0; s < per; s++) {
                 boolean last = s == per - 1 && k < segs - 1;
@@ -183,11 +189,12 @@ public final class ShingleMath {
             double[] rad = new double[segs + 1];
             Arrays.fill(rad, r0 - inset);
             ChainMath liner = c.withRadius(rad);
-            for (int k = 0; k < segs; k++) {
-                double[][] fr = liner.miterRing(k, false, n), rr = liner.miterRing(k + 1, true, n);
+            for (int k = Math.max(0, from); k <= Math.min(segs - 1, to); k++) {
+                double ph = Math.PI / n;   // liner seams sit half a face away from the plate edges
+                double[][] fr = liner.miterRing(k, false, n, ph), rr = liner.miterRing(k + 1, true, n, ph);
                 for (int i = 0; i < n; i++) {
                     int jn = (i + 1) % n;
-                    double am = 2 * Math.PI * (i + 0.5) / n;
+                    double am = 2 * Math.PI * (i + 0.5) / n + ph;
                     double[] radial = ChainMath.apply(c.frame[k], new double[]{Math.sin(am), Math.cos(am), 0});
                     res.add(LINER, new double[][]{fr[i], fr[jn], rr[jn], rr[i]}, uvFull(1f), radial);
                 }

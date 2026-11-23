@@ -17,15 +17,24 @@ public final class ChainMath {
     public final double[] radius;
 
     public ChainMath(int segments, double length, double cy, double[] yawRad, double[] pitchRad, double[] radius) {
+        this(segments, length, new double[]{0, cy, 0}, yawRad, pitchRad, radius, false);
+    }
+
+    /** Path-driven chain: starts at {@code start} and applies yaw/pitch of segment 0 too (its absolute orientation). */
+    public ChainMath(int segments, double length, double[] start, double[] yawRad, double[] pitchRad, double[] radius) {
+        this(segments, length, start, yawRad, pitchRad, radius, true);
+    }
+
+    private ChainMath(int segments, double length, double[] start, double[] yawRad, double[] pitchRad, double[] radius, boolean firstAbsolute) {
         this.segments = segments;
         this.length = length;
         this.radius = radius;
         this.center = new double[segments + 1][];
         this.frame = new double[segments][][];
         double[][] f = ident();
-        double[] c = {0, cy, 0};
+        double[] c = start.clone();
         for (int k = 0; k < segments; k++) {
-            if (k > 0) f = mul(mul(f, ry(yawRad[k])), rx(pitchRad[k]));
+            if (k > 0 || firstAbsolute) f = mul(mul(f, ry(yawRad[k])), rx(pitchRad[k]));
             frame[k] = f;
             center[k] = c;
             c = add(c, apply(f, new double[]{0, 0, -length}));
@@ -57,6 +66,11 @@ public final class ChainMath {
      * by a second-order amount.
      */
     public double[][] miterRing(int j, boolean incoming, int n) {
+        return miterRing(j, incoming, n, 0.0);
+    }
+
+    /** As above, with the ring points turned by phase radians about the axis (the liner is offset half a face). */
+    public double[][] miterRing(int j, boolean incoming, int n, double phase) {
         int a = Math.max(0, j - 1), b = Math.min(segments - 1, j);
         double[] a1 = axis(a), a2 = axis(b);
         double[] bis = add(a1, a2);
@@ -67,7 +81,7 @@ public final class ChainMath {
         double r = radius[j];
         double[][] ring = new double[n][];
         for (int k = 0; k < n; k++) {
-            double ang = 2 * Math.PI * k / n;
+            double ang = 2 * Math.PI * k / n + phase;
             double[] off = apply(frame[seg], new double[]{r * Math.sin(ang), r * Math.cos(ang), 0});
             double t = -dot(nrm, off) / dot(nrm, ax);
             ring[k] = new double[]{center[j][0] + off[0] + t * ax[0], center[j][1] + off[1] + t * ax[1], center[j][2] + off[2] + t * ax[2]};

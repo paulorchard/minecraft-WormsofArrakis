@@ -180,6 +180,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
         int per = Math.max(1, (int) spec.p(6, 1));
         double base = spec.p(7, ScaleMath.LIP_LENGTH);
         boolean liner = spec.p(8, 1) > 0;
+        boolean liner2 = spec.p(8, 1) >= 1.5;   // liner dark: the old 0x404040 tint
         double[][] a = TestAnim.angles(spec, state.getGeckolibData(AGE));
         Integer id = state.getGeckolibData(ID);
         Cached c = CACHE.get(id);
@@ -202,7 +203,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
                 LAST_LOGGED = key;
                 ShingleMath.Result x = c.res;
                 WormsOfArrakis.LOGGER.info("[WormsOfArrakis] skin shingle: segments={} perBone={} faces={} liner={} (colour {}, inset {} blocks) quads liner/skin/lip/rimSkin/rimLip={}/{}/{}/{}/{} maxGap={} minGap={} lipBase={} uncoveredVertices={} cutVertices={} intersectionsLeft={}",
-                        segs, per, n, liner ? "on" : "off", Integer.toHexString(ShingleMath.LINER_COLOR), String.format("%.3f", x.linerInsetUsed),
+                        segs, per, n, liner ? "on" : "off", Integer.toHexString(liner2 ? ShingleMath.LINER_DARK : ShingleMath.LINER_TINT), String.format("%.3f", x.linerInsetUsed),
                         x.byKind[0], x.byKind[1], x.byKind[2], x.byKind[3], x.byKind[4], String.format("%.3f", x.maxGap), String.format("%.3f", x.minGap),
                         base, x.uncovered, x.cutVertices, x.uncutIntersections);
             }
@@ -210,6 +211,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
         long buildNs = System.nanoTime() - t0;
         ShingleStats.frame(rebuild, buildNs, c.res, segs, n);
         final ShingleMath.Result res = c.res;
+        final int linerColor = liner2 ? ShingleMath.LINER_DARK : ShingleMath.LINER_TINT;
         int light = state.lightCoords;
         poseStack.pushPose();
         poseStack.mulPose(Axis.YP.rotationDegrees(-state.getGeckolibData(YAW)));
@@ -221,7 +223,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
             float[] v = res.v;
             for (int q = 0; q < res.quads; q++) {
                 int b = q * 32;
-                int color = res.kind[q] == ShingleMath.LINER ? ShingleMath.LINER_COLOR : ShingleMath.WHITE;
+                int color = res.kind[q] == ShingleMath.LINER ? linerColor : ShingleMath.WHITE;
                 nm.transform(v[b + 5], v[b + 6], v[b + 7], out);
                 for (int k = 0; k < 4; k++) {
                     int at = b + k * 8;

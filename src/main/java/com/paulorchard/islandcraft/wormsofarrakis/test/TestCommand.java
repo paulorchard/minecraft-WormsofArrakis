@@ -9,6 +9,7 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.paulorchard.islandcraft.wormsofarrakis.WormsOfArrakis;
+import com.paulorchard.islandcraft.wormsofarrakis.geometry.BendLimit;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.WormMath;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -48,11 +49,12 @@ final class TestCommand {
                 new Arg("bend", DoubleArgumentType.doubleArg(-90, 90)), new Arg("pitch", DoubleArgumentType.doubleArg(-90, 90)),
                 new Arg("seglen", DoubleArgumentType.doubleArg(0.25, 64)), new Arg("closer", StringArgumentType.word()),
                 new Arg("taper", DoubleArgumentType.doubleArg(0.5, 1.5)), new Arg("per", IntegerArgumentType.integer(1, 16)),
-                new Arg("lip", DoubleArgumentType.doubleArg(0.0, 1.0)), new Arg("liner", StringArgumentType.word()))));
+                new Arg("lip", DoubleArgumentType.doubleArg(0.0, 1.0)), new Arg("liner", StringArgumentType.word()),
+                new Arg("force", StringArgumentType.word()))));
         // curve <width> <segments> <radius_widths> [plane horizontal|vertical|diagonal] [per]
         root.then(branch("curve", 3, List.of(w("width"), new Arg("segments", IntegerArgumentType.integer(1, 400)),
                 new Arg("radius_widths", DoubleArgumentType.doubleArg(0.25, 64)), new Arg("plane", StringArgumentType.word()),
-                new Arg("per", IntegerArgumentType.integer(1, 16)))));
+                new Arg("per", IntegerArgumentType.integer(1, 16)), new Arg("force", StringArgumentType.word()))));
         root.then(Commands.literal("stats").then(Commands.argument("state", StringArgumentType.word()).executes(ctx -> {
             String st = StringArgumentType.getString(ctx, "state");
             TestFlags.stats = st.equals("on");
@@ -62,7 +64,7 @@ final class TestCommand {
         })));
         root.then(branch("wave", 2, List.of(w("width"), new Arg("segments", IntegerArgumentType.integer(1, 400)),
                 new Arg("amplitude", DoubleArgumentType.doubleArg(0, 45)), new Arg("seglen", DoubleArgumentType.doubleArg(0.25, 64)),
-                new Arg("closer", StringArgumentType.word()))));
+                new Arg("closer", StringArgumentType.word()), new Arg("force", StringArgumentType.word()))));
         root.then(branch("mouth", 2, List.of(w("width"), new Arg("action", StringArgumentType.word()))));
         root.then(Commands.literal("clear").executes(ctx -> {
             int n = 0;
@@ -78,6 +80,34 @@ final class TestCommand {
             return removed;
         }));
         d.register(root);
+    }
+
+    /** True when the command carries the word force in any of its free-text arguments. */
+    private static boolean hasForce(CommandContext<CommandSourceStack> ctx) {
+        for (String name : new String[]{"force", "plane", "liner", "closer"}) {
+            if (str(ctx, name, "").equals("force")) return true;
+        }
+        return false;
+    }
+
+    /** Message to the command source (chat) and to the log. */
+    private static void notice(CommandContext<CommandSourceStack> ctx, String msg) {
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {}", msg);
+        ctx.getSource().sendSuccess(() -> Component.literal(msg), true);
+    }
+
+    /** Clamps a (yaw, pitch) pair per joint to the bend limit for segments of the given length unless force; says so. */
+    private static double[] limitAngles(CommandContext<CommandSourceStack> ctx, double width, double yaw, double pitch, double seglen) {
+        double max = BendLimit.maxJointAngleDegrees(width, seglen);
+        if (Math.hypot(yaw, pitch) <= max + 1e-9 || hasForce(ctx)) return new double[]{yaw, pitch};
+        double[] c = BendLimit.clampDegrees(yaw, pitch, width, seglen);
+        notice(ctx, String.format(Locale.ROOT, "bend limit: %.2f deg per joint is more than the %.2f deg allowed at width %s with segments of %s (radius >= %.1f body widths); clamped to yaw %.2f pitch %.2f (add force to build it anyway)",
+                Math.hypot(yaw, pitch), max, trim(width), trim(seglen), BendLimit.MIN_BEND_RADIUS_WIDTHS, c[0], c[1]));
+        return c;
+    }
+
+    private static String trim(double v) {
+        return v == Math.rint(v) ? Long.toString((long) v) : String.format(Locale.ROOT, "%.2f", v);
     }
 
     private static Arg w(String name) {
@@ -144,9 +174,11 @@ final class TestCommand {
                 String closer = str(ctx, "closer", "lip");
                 double per = num(ctx, args, "per", 1);
                 if (closer.equals("scale") || closer.equals("shingle")) seglen = per;
-                double liner = str(ctx, "liner", "on").equals("off") ? 0 : 1;
-                spec = WormSpec.of("chain", closer, width, segs, num(ctx, args, "bend", 0),
-                        num(ctx, args, "pitch", 0), seglen, num(ctx, args, "taper", 1), per, num(ctx, args, "lip", 0.132), liner);
+                String linerWord = str(ctx, "liner", "on");
+                double liner = linerWord.equals("off") ? 0 : linerWord.equals("dark") ? 2 : 1;
+                double[] ang = limitAngles(ctx, width, num(ctx, args, "bend", 0), num(ctx, args, "pitch", 0), seglen);
+                spec = WormSpec.of("chain", closer, width, segs, ang[0],
+                        ang[1], seglen, num(ctx, args, "taper", 1), per, num(ctx, args, "lip", 0.132), liner);
                 reach = width / 2 + 6;
             }
             case "curve" -> {
@@ -154,11 +186,17 @@ final class TestCommand {
                 double rw = num(ctx, args, "radius_widths", 2);
                 String plane = str(ctx, "plane", "horizontal");
                 int per = (int) num(ctx, args, "per", 1);
+                if (plane.equals("force")) plane = "horizontal";
                 if (!List.of("horizontal", "vertical", "diagonal").contains(plane)) {
                     ctx.getSource().sendFailure(Component.literal("plane: horizontal|vertical|diagonal"));
                     return 0;
                 }
                 // constant curvature: angle per joint = segment length / radius of curvature (radius = rw body widths)
+                if (rw < BendLimit.MIN_BEND_RADIUS_WIDTHS && !hasForce(ctx)) {
+                    notice(ctx, String.format(Locale.ROOT, "curve: radius %.2f body widths is below the limit of %.1f; clamped to %.1f (add force to build it anyway)",
+                            rw, BendLimit.MIN_BEND_RADIUS_WIDTHS, BendLimit.MIN_BEND_RADIUS_WIDTHS));
+                    rw = BendLimit.MIN_BEND_RADIUS_WIDTHS;
+                }
                 double deg = Math.toDegrees(per / (rw * width));
                 double yaw = plane.equals("vertical") ? 0 : plane.equals("diagonal") ? deg / Math.sqrt(2) : deg;
                 double pitch = plane.equals("horizontal") ? 0 : plane.equals("diagonal") ? deg / Math.sqrt(2) : deg;
@@ -171,8 +209,9 @@ final class TestCommand {
                 double seglen = num(ctx, args, "seglen", 2);
                 int segs = (int) num(ctx, args, "segments", 12);
                 String closer = str(ctx, "closer", "lip");
-                if (closer.equals("scale")) seglen = 1;
-                spec = WormSpec.of("wave", closer, width, segs, num(ctx, args, "amplitude", 8), 0, seglen, 1, 1, 0.132);
+                if (closer.equals("scale") || closer.equals("shingle")) seglen = 1;
+                double[] amp = limitAngles(ctx, width, num(ctx, args, "amplitude", 8), 0, seglen);
+                spec = WormSpec.of("wave", closer, width, segs, amp[0], 0, seglen, 1, 1, 0.132);
                 reach = width / 2 + 6;
             }
             case "mouth" -> {
