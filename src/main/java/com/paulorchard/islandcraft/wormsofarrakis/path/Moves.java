@@ -59,12 +59,12 @@ public final class Moves {
 
         public WormPose pose(double s) { return WormPose.at(path, s, segments, 1.0); }
 
-        /** {base height, top of the head height}; the head is a rigid straight piece along the chord to the point BODY_LENGTH ahead. */
+        /** {base height, top of the head height}; the head is a rigid straight piece along the chord to the path point headLength ahead, so its tip lies on the path. */
         public double[] headHeights(double s) {
             double[] b = path.pos(s);
-            double sf = WormPose.ahead(path, s, new double[]{0, b[1], b[0]}, HeadSpec.BODY_LENGTH);
+            double sf = WormPose.ahead(path, s, new double[]{0, b[1], b[0]}, HeadSpec.headLength(width));
             double[] f = path.pos(sf);
-            double dy = (f[1] - b[1]) / HeadSpec.BODY_LENGTH;
+            double dy = (f[1] - b[1]) / HeadSpec.headLength(width);
             return new double[]{b[1], b[1] + dy * HeadSpec.headLength(width)};
         }
 
@@ -94,7 +94,7 @@ public final class Moves {
         double r0 = HeadSpec.ringRadius(width);
         double limitR = BendLimit.minRadius(width), R = limitR * radiusFactor;
         if (R + 1e-9 < limitR && !force) throw new Rejected(String.format("arch radius %.1f is below the limit %.1f (%.1f body widths); use force", R, limitR, BendLimit.MIN_BEND_RADIUS_WIDTHS));
-        double depth = -(r0 + 1.0);
+        double depth = -(r0 + 1.5);
         double peakAxis = crestFraction * width - r0 - rise();
         double h = peakAxis - depth;
         double c = 1.0 - h / (2 * R);
@@ -120,7 +120,8 @@ public final class Moves {
 
     private static double ascentDepth(double width, double r0, double angleDeg, double underRadius) {
         double a = Math.toRadians(angleDeg);
-        return Math.min(-(width * Math.sin(a) + underRadius * (1 - Math.cos(a))), -(r0 + 1.0));
+        // the straight stretch below the crossing is at least width + r0 long (one body width, plus the radius so the ring is clear of the sand)
+        return Math.min(-((width + r0) * Math.sin(a) + underRadius * (1 - Math.cos(a))), -(r0 + 2.0));
     }
 
     /** First s in [lo, hi] where the exposed count reaches target (monotone on a straight ascent). */
@@ -202,7 +203,7 @@ public final class Moves {
         double sTurn = 0.5 * (sa + sb);
         double ascentStraight = sTurn - sArcEnd;
         double yTurn = yEnd + ascentStraight * Math.sin(a);
-        double yDown = Math.min(-width * Math.sin(a), -(m.r0 + 1.0) + ur * (1 - Math.cos(a)));
+        double yDown = Math.min(-(width + m.r0) * Math.sin(a), -(m.r0 + 2.0) + ur * (1 - Math.cos(a)));
         double descentLen = (yTurn - yDown) / Math.sin(a);
         PlanarPath p = PlanarPath.start(0, depth, 0).line(TUNNEL_LEAD).arc(ur, angleDeg).line(ascentStraight).arc(rt, -2 * angleDeg)
                 .line(descentLen).arc(ur, angleDeg).line(20).build();

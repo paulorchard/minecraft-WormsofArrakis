@@ -101,7 +101,7 @@ final class WormModels {
                         s.kind(), n, segs, len, s.mode(), scaleMode ? per : 0, prm.lipLength(), segs, quads);
                 return model(id, top, r);
             }
-            case "mouth":
+            case "mouth": case "move":
                 return MouthModel.build(s, id, n, r);
             default:
                 throw new IllegalArgumentException("unknown worm kind " + s.kind());

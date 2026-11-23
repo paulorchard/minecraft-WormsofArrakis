@@ -24,6 +24,7 @@ final class TestWormModel extends GeoModel<TestWormEntity> {
     @Override
     public Identifier getModelResource(GeoRenderState state) {
         WormSpec spec = WormSpec.parse(state.getGeckolibData(TestWormRenderer.SPEC));
+        if (spec.kind().equals("move")) spec = WormSpec.of("move", "-", spec.p(0, 16));   // the head model depends on the width only
         return Identifier.fromNamespaceAndPath(WormsOfArrakis.MOD_ID, "worm/" + spec.key());
     }
 

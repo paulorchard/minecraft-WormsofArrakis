@@ -16,6 +16,9 @@ final class TestControllers {
     static void register(TestWormEntity entity, AnimatableManager.ControllerRegistrar controllers) {
         controllers.add(new AnimationController<TestWormEntity>("mouth", 0, state -> {
             WormSpec spec = WormSpec.parse(state.animatable().getSpecString());
+            if (spec.kind().equals("move")) {
+                return state.setAndContinue(RawAnimation.begin().thenPlayAndHold(spec.p(8, 0) > 0 ? "mouth_open" : "mouth_close"));
+            }
             if (!spec.kind().equals("mouth")) return PlayState.STOP;
             return switch (spec.mode()) {
                 case "open" -> state.setAndContinue(RawAnimation.begin().thenPlayAndHold("mouth_open"));

@@ -27,10 +27,10 @@ import java.util.List;
  */
 final class MouthModel {
     static final int FLAPS = 3;
-    static final int BODY_SEGMENTS = 4;
-    static final double BODY_SEGMENT_LENGTH = 2.0;
+    static final int BODY_SEGMENTS = com.paulorchard.islandcraft.wormsofarrakis.path.HeadSpec.BODY_SEGMENTS;
+    static final double BODY_SEGMENT_LENGTH = com.paulorchard.islandcraft.wormsofarrakis.path.HeadSpec.BODY_SEGMENT_LENGTH;
     /** Height of the closed cone in front of the ring, as a fraction of the ring radius. */
-    static final double CONE_HEIGHT = 0.6;
+    static final double CONE_HEIGHT = com.paulorchard.islandcraft.wormsofarrakis.path.HeadSpec.CONE_HEIGHT;
 
     private MouthModel() {}
 

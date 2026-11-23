@@ -10,6 +10,9 @@ import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.paulorchard.islandcraft.wormsofarrakis.WormsOfArrakis;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.BendLimit;
+import com.paulorchard.islandcraft.wormsofarrakis.geometry.ScaleMath;
+import com.paulorchard.islandcraft.wormsofarrakis.path.HeadSpec;
+import com.paulorchard.islandcraft.wormsofarrakis.path.Moves;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.WormMath;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -65,6 +68,54 @@ final class TestCommand {
         root.then(branch("wave", 2, List.of(w("width"), new Arg("segments", IntegerArgumentType.integer(1, 400)),
                 new Arg("amplitude", DoubleArgumentType.doubleArg(0, 45)), new Arg("seglen", DoubleArgumentType.doubleArg(0.25, 64)),
                 new Arg("closer", StringArgumentType.word()), new Arg("force", StringArgumentType.word()))));
+        root.then(branch("crest", 2, List.of(w("width"), new Arg("segments", IntegerArgumentType.integer(2, 400)),
+                new Arg("crest_fraction", DoubleArgumentType.doubleArg(0.05, 1.0)), new Arg("speed", DoubleArgumentType.doubleArg(0.5, 64)),
+                new Arg("force", StringArgumentType.word()))));
+        root.then(branch("emerge", 3, List.of(w("width"), new Arg("segments", IntegerArgumentType.integer(2, 400)),
+                new Arg("n", IntegerArgumentType.integer(1, 399)), new Arg("angle", DoubleArgumentType.doubleArg(5, 90)),
+                new Arg("speed", DoubleArgumentType.doubleArg(0.5, 64)), new Arg("hold", DoubleArgumentType.doubleArg(0, 120)),
+                new Arg("mouth", StringArgumentType.word()), new Arg("force", StringArgumentType.word()))));
+        root.then(branch("crash", 3, List.of(w("width"), new Arg("segments", IntegerArgumentType.integer(2, 400)),
+                new Arg("n", IntegerArgumentType.integer(1, 399)), new Arg("angle", DoubleArgumentType.doubleArg(5, 85)),
+                new Arg("speed", DoubleArgumentType.doubleArg(0.5, 64)), new Arg("gravity", DoubleArgumentType.doubleArg(0.5, 80)),
+                new Arg("top_speed", DoubleArgumentType.doubleArg(0.5, 64)), new Arg("mouth", StringArgumentType.word()),
+                new Arg("ballistic", StringArgumentType.word()), new Arg("force", StringArgumentType.word()))));
+        root.then(Commands.literal("stop").executes(ctx -> {
+            int n = 0;
+            for (net.minecraft.world.entity.Entity e : ctx.getSource().getLevel().getAllEntities()) {
+                if (e instanceof TestWormEntity t && t.getSpecString().startsWith("move;")) { e.discard(); n++; }
+            }
+            int removed = n;
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] stop: {} moving worms removed", removed);
+            ctx.getSource().sendSuccess(() -> Component.literal("Stopped " + removed + " moving worms"), true);
+            return removed;
+        }));
+        root.then(Commands.literal("speed").then(Commands.argument("value", DoubleArgumentType.doubleArg(0.5, 64)).executes(ctx -> {
+            double v = DoubleArgumentType.getDouble(ctx, "value");
+            int n = 0;
+            for (net.minecraft.world.entity.Entity e : ctx.getSource().getLevel().getAllEntities()) {
+                if (!(e instanceof TestWormEntity t) || !t.getSpecString().startsWith("move;")) continue;
+                WormSpec s = WormSpec.parse(t.getSpecString());
+                double nominal = MoveFactory.get(s).nominalSpeed;
+                double tauNow = MoveFactory.tau(s, e.tickCount);
+                double[] p = s.p().clone();
+                p[11] = v / nominal;
+                p[12] = e.tickCount;
+                p[13] = tauNow;
+                t.setSpec(new WormSpec(s.kind(), s.mode(), p));
+                n++;
+            }
+            int changed = n;
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] speed {}: {} moving worms changed", v, changed);
+            ctx.getSource().sendSuccess(() -> Component.literal("Speed " + v + " blocks/s for " + changed + " moving worms"), true);
+            return changed;
+        })));
+        root.then(Commands.literal("surface").then(Commands.argument("mode", StringArgumentType.word()).executes(ctx -> {
+            String m = StringArgumentType.getString(ctx, "mode");
+            TestFlags.worldSurface = m.equals("world");
+            notice(ctx, "surface " + (TestFlags.worldSurface ? "world (client height map)" : "plane (the height the worm was spawned at)"));
+            return 1;
+        })));
         root.then(branch("mouth", 2, List.of(w("width"), new Arg("action", StringArgumentType.word()))));
         root.then(Commands.literal("clear").executes(ctx -> {
             int n = 0;
@@ -110,6 +161,25 @@ final class TestCommand {
         return v == Math.rint(v) ? Long.toString((long) v) : String.format(Locale.ROOT, "%.2f", v);
     }
 
+    /** One INFO line with the measured numbers of a move (pure maths, same as the unit tests). */
+    private static void logMove(Moves.Move m, WormSpec s) {
+        double rise = Math.sin(Math.toRadians(ScaleMath.TILT_DEG)) * ScaleMath.SKIN_LENGTH;
+        switch (m.kind) {
+            case "crest" -> WormsOfArrakis.LOGGER.info("[WormsOfArrakis] path crest: width={} segments={} fraction={} peakTop={} blocks above the sand (limit {}), arch radius {}, tunnel depth {}, speed {} blocks/s",
+                    m.width, m.segments, s.p(2, 0.4), String.format(Locale.ROOT, "%.2f", m.apexY + m.r0 + rise), 0.5 * m.width, String.format(Locale.ROOT, "%.1f", m.topRadius),
+                    String.format(Locale.ROOT, "%.2f", m.tunnelDepth), m.speed);
+            case "emerge" -> {
+                double[] h = m.headHeights(m.sHold);
+                WormsOfArrakis.LOGGER.info("[WormsOfArrakis] path emerge: width={} segments={} n={} angle={} exposed={} headBaseHeight={} headTopHeight={} HEAD_LENGTH(body {}, total {}) hold={}s speed={} blocks/s",
+                        m.width, m.segments, m.n, s.p(3, 90), m.pose(m.sHold).exposed(0), String.format(Locale.ROOT, "%.2f", h[0]), String.format(Locale.ROOT, "%.2f", h[1]),
+                        HeadSpec.BODY_LENGTH, String.format(Locale.ROOT, "%.2f", HeadSpec.headLength(m.width)), m.hold, m.speed);
+            }
+            default -> WormsOfArrakis.LOGGER.info("[WormsOfArrakis] path crash: width={} segments={} n={} angle={} maxExposed={} span={} apexHeight={} topRadius={} exposedPath={} ballistic={}",
+                    m.width, m.segments, m.n, s.p(3, 70), m.maxExposed(), String.format(Locale.ROOT, "%.1f", m.span()), String.format(Locale.ROOT, "%.1f", m.apexY),
+                    String.format(Locale.ROOT, "%.1f", m.topRadius), String.format(Locale.ROOT, "%.1f", m.sCross2 - m.sCross1), s.p(9, 1) > 0);
+        }
+    }
+
     private static Arg w(String name) {
         return new Arg(name, DoubleArgumentType.doubleArg(1, 128));
     }
@@ -147,6 +217,7 @@ final class TestCommand {
         double width = num(ctx, args, "width", 16);
         WormSpec spec;
         double reach;   // how far in front of the player the worm centre goes
+        double axisShift = 0;   // moves: shift along the worm axis so the exposed part is in front of the player
         switch (kind) {
             case "ring" -> {
                 int faces = (int) num(ctx, args, "faces", 0);
@@ -214,6 +285,33 @@ final class TestCommand {
                 spec = WormSpec.of("wave", closer, width, segs, amp[0], 0, seglen, 1, 1, 0.132);
                 reach = width / 2 + 6;
             }
+            case "crest", "emerge", "crash" -> {
+                boolean force = hasForce(ctx);
+                String mouthWord = str(ctx, "mouth", kind.equals("crest") ? "closed" : "open");
+                boolean mouthOpen = mouthWord.equals("open");
+                int segs = (int) num(ctx, args, "segments", 60);
+                WormSpec ms;
+                switch (kind) {
+                    case "crest" -> ms = MoveFactory.spec("crest", width, segs, num(ctx, args, "crest_fraction", 0.4), 0, num(ctx, args, "speed", 8), 0, 0, 0,
+                            false, true, force, 1.0, 1.0, 1);
+                    case "emerge" -> ms = MoveFactory.spec("emerge", width, segs, num(ctx, args, "n", 10), num(ctx, args, "angle", 90), num(ctx, args, "speed", 12),
+                            num(ctx, args, "hold", 2), 0, 0, mouthOpen, true, force, 1.0, 1.0, 1);
+                    default -> ms = MoveFactory.spec("crash", width, segs, num(ctx, args, "n", 10), num(ctx, args, "angle", 70), num(ctx, args, "speed", 12),
+                            0, num(ctx, args, "gravity", 12), num(ctx, args, "top_speed", 4), mouthOpen, !str(ctx, "ballistic", "on").equals("off"), force, 1.0, 1.0, 1);
+                }
+                Moves.Move mv;
+                try {
+                    mv = MoveFactory.get(ms);
+                } catch (Moves.Rejected rej) {
+                    WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} refused: {}", kind, rej.getMessage());
+                    ctx.getSource().sendFailure(Component.literal(kind + " refused: " + rej.getMessage()));
+                    return 0;
+                }
+                spec = ms;
+                reach = Math.max(25.0, width * 1.2 + 15);
+                axisShift = MoveFactory.centreZ(ms);
+                logMove(mv, ms);
+            }
             case "mouth" -> {
                 if (MOUTH_DISABLED) { ctx.getSource().sendFailure(Component.literal("mouth arrives with experiment 5")); return 0; }
                 String action = str(ctx, "action", "cycle");
@@ -236,6 +334,9 @@ final class TestCommand {
         // in front of the player, with the worm axis across the view (yaw + 90) so the side of the body is seen
         double x = pos.x - Math.sin(yawRad) * reach;
         double z = pos.z + Math.cos(yawRad) * reach;
+        double axisYaw = Math.toRadians(rot.y + 90.0);   // the entity faces yaw + 90, model +Z is its facing direction
+        x += Math.sin(axisYaw) * axisShift;
+        z -= Math.cos(axisYaw) * axisShift;
         TestWormEntity worm = TestSetup.WORM_TEST.get().create(level, EntitySpawnReason.COMMAND);
         if (worm == null) {
             src.sendFailure(Component.literal("could not create arrakis_worm_test"));

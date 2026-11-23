@@ -117,7 +117,10 @@ public final class WormPose {
     public boolean[] drawn(double ringRadius, SurfaceProvider surface) {
         boolean[] d = new boolean[segments];
         for (int k = 0; k < segments; k++) {
-            double top = Math.max(joints[k][1], joints[k + 1][1]) + ringRadius + 0.2;
+            // highest point of a ring whose axis has the vertical component ay is r sqrt(1 - ay^2); plus the plates (0.2) and the mitre tilt
+            double ay = (joints[k + 1][1] - joints[k][1]) / pitch;
+            double tilt = Math.max(Math.abs(pitchAngle[k]), k + 1 < segments ? Math.abs(pitchAngle[k + 1]) : 0) * 0.5;
+            double top = Math.max(joints[k][1], joints[k + 1][1]) + ringRadius * Math.sqrt(Math.max(0, 1 - ay * ay)) + 0.2 + ringRadius * tilt;
             double surf = Math.max(surface.heightAt(joints[k][2]), surface.heightAt(joints[k + 1][2]));
             d[k] = top > surf - 1.0;
         }
