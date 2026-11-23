@@ -15,7 +15,7 @@ import com.paulorchard.islandcraft.wormsofarrakis.geometry.BendLimit;
  */
 public final class FallFamily {
     /** Sigma grid in table body widths (the sketch's W). */
-    public static final double D = 0.01, SIG_MIN = -3.2, SIG_MAX = 2.8;
+    public static final double D = 0.0025, SIG_MIN = -3.2, SIG_MAX = 2.8;
     public static final int N = (int) Math.round((SIG_MAX - SIG_MIN) / D) + 1, I0 = (int) Math.round(-SIG_MIN / D);
     /** The sketch, frame 1 (the tower) to frame 4, tail to head, in body widths; the hole is at index HOLE. */
     public static final double[][][] SKETCH = {
@@ -28,8 +28,11 @@ public final class FallFamily {
     public static final double[] KEY_H = {2.474, 2.003, 1.456, 0.394};
     public static final double[] KEY_EXPOSED = {2.50, 2.11, 1.60, 0.47};
     public static final double[] KEY_DRIFT = {-0.159, -0.730, -1.668, -2.220};
+    public static final double[] KEY_DX = {0.318, 0.147, -0.418, 0.260};
     public static final double TAIL_DEPTH = 1.24;
     public static final double SKETCH_HEIGHT = 2.5;
+    /** The curve is limited to a radius 3% above the requested one, so that the joint angles of the unit-pitch chords (a polygon of the curve) stay inside the limit. */
+    public static final double SAFETY = 1.03;
 
     private final double width, f, sc, minRadiusW, k, delta;
     private final double coneBlocks;
@@ -42,7 +45,7 @@ public final class FallFamily {
         this.f = heightW / SKETCH_HEIGHT;
         this.sc = width * f;
         this.minRadiusW = minRadiusW;
-        this.k = f / minRadiusW;
+        this.k = f / (minRadiusW * SAFETY);
         this.delta = Math.toRadians((90 - leanDeg) - Math.toDegrees(rawHeadingAt(0, 1.0)));
         this.coneBlocks = HeadSpec.coneHeight(width);
         for (int n = 0; n < 4; n++) {
@@ -83,6 +86,7 @@ public final class FallFamily {
     /** Heading (radians) of the sketch's piece that contains sigma (table W); the end pieces extend. */
     public static double rawHeadingAt(int frame, double sigma) {
         double[][] p = SKETCH[frame];
+        if (frame == 0) return Math.atan2(p[2][1] - p[0][1], p[2][0] - p[0][0]);   // the tower is one straight line
         double[] vs = vertexSigma(frame);
         int piece = 0;
         for (int i = 0; i < p.length - 1; i++) if (vs[i] <= sigma) piece = i;
@@ -271,10 +275,10 @@ public final class FallFamily {
     }
 
     /** Measured numbers of one pose, for the frame table and the tests. */
-    public record Info(double tipHeightW, double exposedW, double holeHeadingDeg, double tipHeadingDeg, double tailDriftW, double minRadiusW) {
+    public record Info(double tipDxW, double tipHeightW, double exposedW, double holeHeadingDeg, double tipHeadingDeg, double tailDriftW, double minRadiusW) {
         public String line() {
-            return String.format(java.util.Locale.ROOT, "tipHeight=%.2fW exposedLength=%.2fW holeHeading=%.1fdeg tipHeading=%.1fdeg tailDrift=%.2fW minRadius=%.2fW",
-                    tipHeightW, exposedW, holeHeadingDeg, tipHeadingDeg, tailDriftW, minRadiusW);
+            return String.format(java.util.Locale.ROOT, "tipDx=%.2fW tipHeight=%.2fW exposedLength=%.2fW holeHeading=%.1fdeg tipHeading=%.1fdeg tailDrift=%.2fW minRadius=%.2fW",
+                    tipDxW, tipHeightW, exposedW, holeHeadingDeg, tipHeadingDeg, tailDriftW, minRadiusW);
         }
     }
 
@@ -285,7 +289,8 @@ public final class FallFamily {
         double tip = p.joints[0][1] + (p.joints[0][1] - p.joints[1][1]) * coneBlocks;
         double tailS = sh.arcAtHeight(-TAIL_DEPTH * sc);
         double mr = pl.sigmaTip > 0 ? sh.minRadiusW(0, pl.sigmaTip) : Double.POSITIVE_INFINITY;
-        return new Info(tip / width, pl.sigmaTip / width, Math.toDegrees(sh.heading(0)), Math.toDegrees(sh.heading(pl.sigmaTip)),
+        double tipX = p.joints[0][2] + (p.joints[0][2] - p.joints[1][2]) * coneBlocks;
+        return new Info(tipX / width, tip / width, pl.sigmaTip / width, Math.toDegrees(sh.heading(0)), Math.toDegrees(sh.heading(pl.sigmaTip)),
                 sh.pos(tailS)[0] / width, mr);
     }
 

@@ -11,6 +11,7 @@ import com.mojang.brigadier.context.CommandContext;
 import com.paulorchard.islandcraft.wormsofarrakis.WormsOfArrakis;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.BendLimit;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.ScaleMath;
+import com.paulorchard.islandcraft.wormsofarrakis.path.FallFamily;
 import com.paulorchard.islandcraft.wormsofarrakis.path.HeadSpec;
 import com.paulorchard.islandcraft.wormsofarrakis.path.Moves;
 import com.paulorchard.islandcraft.wormsofarrakis.path.WorldBase;
@@ -77,10 +78,14 @@ final class TestCommand {
                 new Arg("n", IntegerArgumentType.integer(1, 399)), new Arg("angle", DoubleArgumentType.doubleArg(5, 90)),
                 new Arg("speed", DoubleArgumentType.doubleArg(0.5, 64)), new Arg("hold", DoubleArgumentType.doubleArg(0, 120)),
                 new Arg("mouth", StringArgumentType.word()), new Arg("force", StringArgumentType.word()))));
-        // crash <width> <segments> [apex=2.5] [angle=40] [gravity=12] [mouth=open|closed] [force]  (keyed, any order; a bare number is the apex)
+        // crash <width> <segments> [height=2.5] [lean=7] [hold=1.5] [speed=12] [gravity=12] [min_radius=2] [mouth=open|closed] [force]: rise, hold, fall into the hole (keyed, any order; a bare number is the height)
+        // crashproj = the prompt 05 projectile (apex= angle= gravity=), crasharc = the prompt 03 arc
         root.then(Commands.literal("crash").then(Commands.argument("width", DoubleArgumentType.doubleArg(1, 128))
                 .then(Commands.argument("segments", IntegerArgumentType.integer(2, 1000)).executes(ctx -> run(ctx, "crash", List.of()))
                         .then(Commands.argument("opts", StringArgumentType.greedyString()).executes(ctx -> run(ctx, "crash", List.of()))))));
+        root.then(Commands.literal("crashproj").then(Commands.argument("width", DoubleArgumentType.doubleArg(1, 128))
+                .then(Commands.argument("segments", IntegerArgumentType.integer(2, 1000)).executes(ctx -> run(ctx, "crashproj", List.of()))
+                        .then(Commands.argument("opts", StringArgumentType.greedyString()).executes(ctx -> run(ctx, "crashproj", List.of()))))));
         root.then(branch("crasharc", 3, List.of(w("width"), new Arg("segments", IntegerArgumentType.integer(2, 1000)),
                 new Arg("n", IntegerArgumentType.integer(1, 399)), new Arg("angle", DoubleArgumentType.doubleArg(5, 85)),
                 new Arg("speed", DoubleArgumentType.doubleArg(0.5, 64)), new Arg("gravity", DoubleArgumentType.doubleArg(0.5, 80)),
@@ -213,15 +218,16 @@ final class TestCommand {
     private static int freezeCmd(CommandContext<CommandSourceStack> ctx) {
         String v = StringArgumentType.getString(ctx, "t");
         double t = -1;
-        if (!v.equals("off")) {
+        if (v.equals("hold")) t = 9;   // the held tower of a crash (for the other moves: their last frame)
+        else if (!v.equals("off")) {
             try {
                 t = Double.parseDouble(v);
             } catch (NumberFormatException e) {
-                fail(ctx, ("freeze <t 0..1|off>"));
+                fail(ctx, ("freeze <t 0..1|hold|off>"));
                 return 0;
             }
-            if (t < 0 || t > 1) {
-                fail(ctx, ("t must be between 0 and 1"));
+            if (t != 9 && (t < 0 || t > 1)) {
+                fail(ctx, ("t must be between 0 and 1, or hold"));
                 return 0;
             }
         }
@@ -237,7 +243,7 @@ final class TestCommand {
             p[17] = t;
             w.setSpec(new WormSpec(s.kind(), s.mode(), p));
             Moves.Move m = MoveFactory.get(s);
-            if (t >= 0) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] freeze {} {}", m.kind, m.frame(t).line());
+            if (t >= 0) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] freeze {} {}", m.kind, m.frame(m.fam != null ? t : Math.min(t, 1.0)).line());
             n++;
         }
         int changed = n;
@@ -275,6 +281,21 @@ final class TestCommand {
         return v == Math.rint(v) ? Long.toString((long) v) : String.format(Locale.ROOT, "%.2f", v);
     }
 
+    /** The log lines of the crash as rise, hold and fall: the numbers, then the table at the four key heights next to the sketch. */
+    private static void logFall(Moves.Move m, WormSpec s, String hl) {
+        double W = m.width, f = m.fallScale;
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] path crash: width={} segments={} height={}W lean={}deg hold={}s speed={} blocks/s gravity={} minRadius={}W n={} (formula {}) towerTip={}W riseTime={}s fallDuration={}s segmentsNeeded={} HEAD_LENGTH={} scale={}{}",
+                m.width, m.segments, s.p(2, 2.5), s.p(3, 7), m.hold, m.speed, m.gravity, String.format(Locale.ROOT, "%.1f", s.p(15, 2.0)), m.n, String.format(Locale.ROOT, "%.2f", m.nFormula),
+                String.format(Locale.ROOT, "%.2f", m.tip(m.sHold)[1] / W), String.format(Locale.ROOT, "%.2f", m.riseTime), String.format(Locale.ROOT, "%.2f", m.fallTime), m.segmentsNeeded, hl,
+                String.format(Locale.ROOT, "%.2f", f), m.note.isEmpty() ? "" : " (" + m.note + ")");
+        for (int i = 0; i < 4; i++) {
+            FallFamily.Info in = m.fam.info(FallFamily.KEY_H[i] * f * W);
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] crash key frame {}: {} | sketch: tipDx={}W tipHeight={}W exposedLength={}W tailDrift={}W", i + 1, in.line(), String.format(Locale.ROOT, "%.2f", FallFamily.KEY_DX[i] * f),
+                    String.format(Locale.ROOT, "%.2f", FallFamily.KEY_H[i] * f), String.format(Locale.ROOT, "%.2f", FallFamily.KEY_EXPOSED[i] * f), String.format(Locale.ROOT, "%.2f", FallFamily.KEY_DRIFT[i] * f));
+        }
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] crash frame hold: {}", m.frame(9).line());
+    }
+
     /** One INFO line with the measured numbers of a move (pure maths, same as the unit tests), then the frame table. */
     private static void logMove(Moves.Move m, WormSpec s) {
         double rise = Math.sin(Math.toRadians(ScaleMath.TILT_DEG)) * ScaleMath.SKIN_LENGTH;
@@ -291,15 +312,55 @@ final class TestCommand {
                         m.width, m.segments, m.n, s.p(3, 90), m.pose(m.sHold).exposedBody(0), String.format(Locale.ROOT, "%.2f", h[0]), String.format(Locale.ROOT, "%.2f", h[1]),
                         hl, m.hold, m.speed);
             }
-            case "proj" -> WormsOfArrakis.LOGGER.info("[WormsOfArrakis] path crash: width={} segments={} apex={}W angle={}{} gravity={} v0={} flightTime={}s range={}W apexRadius={}W exposedMax={} segmentsNeeded={} HEAD_LENGTH={}",
+            case "fall" -> logFall(m, s, hl);
+            case "proj" -> WormsOfArrakis.LOGGER.info("[WormsOfArrakis] path crashproj: width={} segments={} apex={}W angle={}{} gravity={} v0={} flightTime={}s range={}W apexRadius={}W exposedMax={} segmentsNeeded={} HEAD_LENGTH={}",
                     m.width, m.segments, s.p(2, 2.5), String.format(Locale.ROOT, "%.1f", m.angleDeg), m.angleDeg != m.angleRequested ? " (clamped from " + String.format(Locale.ROOT, "%.1f", m.angleRequested) + ")" : "",
                     m.gravity, String.format(Locale.ROOT, "%.2f", m.v0), String.format(Locale.ROOT, "%.2f", m.flightTime), String.format(Locale.ROOT, "%.2f", m.range / m.width),
                     String.format(Locale.ROOT, "%.2f", m.topRadius / m.width), m.exposedMax, m.segmentsNeeded, hl);
-            default -> WormsOfArrakis.LOGGER.info("[WormsOfArrakis] path crash: width={} segments={} n={} angle={} maxExposed={} span={} apexHeight={} topRadius={} exposedPath={} HEAD_LENGTH={} ballistic={}",
+            default -> WormsOfArrakis.LOGGER.info("[WormsOfArrakis] path crasharc: width={} segments={} n={} angle={} maxExposed={} span={} apexHeight={} topRadius={} exposedPath={} HEAD_LENGTH={} ballistic={}",
                     m.width, m.segments, m.n, s.p(3, 70), m.maxExposed(), String.format(Locale.ROOT, "%.1f", m.span()), String.format(Locale.ROOT, "%.1f", m.apexY),
                     String.format(Locale.ROOT, "%.1f", m.topRadius), String.format(Locale.ROOT, "%.1f", m.sCross2 - m.sCross1), hl, s.p(9, 1) > 0);
         }
-        for (int i = 0; i <= 3; i++) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} {}", m.kind, m.frame(i / 3.0).line());
+        int frames = m.fam != null ? 4 : 3;
+        for (int i = 0; i <= frames; i++) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} {}", m.kind, m.frame(i / (double) frames).line());
+    }
+
+    /** Parses the free text after crash width segments: height=, lean=, hold=, speed=, gravity=, min_radius=, mouth=open|closed, force; a bare number is the height. Returns height, lean, hold, speed, gravity, minRadius, mouthOpen (1/0). */
+    private static double[] fallOptions(String opts, boolean[] force) {
+        double[] v = {Moves.DEFAULT_HEIGHT, Moves.DEFAULT_LEAN, Moves.DEFAULT_HOLD, 12, 12, 2.0, 1};
+        int bare = 0;
+        for (String tok : opts.trim().split("\\s+")) {
+            if (tok.isEmpty()) continue;
+            if (tok.equals("force")) { force[0] = true; continue; }
+            if (tok.equals("open") || tok.equals("closed")) { v[6] = tok.equals("open") ? 1 : 0; continue; }
+            int eq = tok.indexOf('=');
+            try {
+                if (eq < 0) {
+                    if (bare > 0) throw new IllegalArgumentException("unknown word " + tok);
+                    v[0] = Double.parseDouble(tok);
+                    bare++;
+                    continue;
+                }
+                String key = tok.substring(0, eq), val = tok.substring(eq + 1);
+                switch (key) {
+                    case "height" -> v[0] = Double.parseDouble(val);
+                    case "lean" -> v[1] = Double.parseDouble(val);
+                    case "hold" -> v[2] = Double.parseDouble(val);
+                    case "speed" -> v[3] = Double.parseDouble(val);
+                    case "gravity" -> v[4] = Double.parseDouble(val);
+                    case "min_radius" -> v[5] = Double.parseDouble(val);
+                    case "mouth" -> {
+                        if (!val.equals("open") && !val.equals("closed")) throw new IllegalArgumentException("mouth must be open or closed");
+                        v[6] = val.equals("open") ? 1 : 0;
+                    }
+                    default -> throw new IllegalArgumentException("unknown key " + key);
+                }
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("not a number: " + tok);
+            }
+        }
+        if (v[3] < 0.5) throw new IllegalArgumentException("speed must be at least 0.5");
+        return v;
     }
 
     /** Parses the free text after crash width segments: apex=, angle=, gravity=, mouth=open|closed, force; a bare number is the apex. Returns apex, angle, gravity, mouthOpen (1/0). */
@@ -491,7 +552,7 @@ final class TestCommand {
                 spec = WormSpec.of("wave", closer, width, segs, amp[0], 0, seglen, 1, 1, 0.132);
                 reach = width / 2 + 6;
             }
-            case "crest", "emerge", "crash", "crasharc" -> {
+            case "crest", "emerge", "crash", "crashproj", "crasharc" -> {
                 boolean force = hasForce(ctx);
                 String mouthWord = str(ctx, "mouth", kind.equals("crest") ? "closed" : "open");
                 if (!mouthWord.equals("open") && !mouthWord.equals("closed")) { fail(ctx, ("mouth must be open or closed, not " + mouthWord)); return 0; }
@@ -515,9 +576,22 @@ final class TestCommand {
                         boolean[] fo = {force};
                         double[] v;
                         try {
+                            v = fallOptions(str(ctx, "opts", ""), fo);
+                        } catch (IllegalArgumentException bad) {
+                            fail(ctx, ("crash: " + bad.getMessage() + " (crash <width> <segments> [height=2.5] [lean=7] [hold=1.5] [speed=12] [gravity=12] [min_radius=2] [mouth=open|closed] [force])"));
+                            return 0;
+                        }
+                        force = fo[0];
+                        mouthOpen = v[6] != 0;
+                        ms = MoveFactory.spec("fall", width, segs, v[0], v[1], v[3], v[2], v[4], 0, mouthOpen, true, force, 1.0, v[5], 1);
+                    }
+                    case "crashproj" -> {
+                        boolean[] fo = {force};
+                        double[] v;
+                        try {
                             v = projectileOptions(str(ctx, "opts", ""), fo);
                         } catch (IllegalArgumentException bad) {
-                            fail(ctx, ("crash: " + bad.getMessage() + " (crash <width> <segments> [apex=2.5] [angle=40] [gravity=12] [mouth=open|closed] [force])"));
+                            fail(ctx, ("crashproj: " + bad.getMessage() + " (crashproj <width> <segments> [apex=2.5] [angle=40] [gravity=12] [mouth=open|closed] [force])"));
                             return 0;
                         }
                         force = fo[0];
