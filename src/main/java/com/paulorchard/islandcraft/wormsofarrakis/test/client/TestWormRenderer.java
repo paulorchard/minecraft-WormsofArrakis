@@ -102,6 +102,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
 
     private static final Map<Integer, MoveCache> MOVE_CACHE = new HashMap<>();
     private static final Map<Integer, Boolean> HOLD_LOGGED = new HashMap<>();
+    private static final Map<Integer, String> PHASE_LAST = new HashMap<>();
     private static final Map<Long, Double> COLUMN_CACHE = new HashMap<>();
     private static String LAST_MOVE_LOG = "";
 
@@ -136,8 +137,16 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
     private void submitMove(WormSpec spec, EntityRenderState state, PoseStack poseStack, SubmitNodeCollector collector, CameraRenderState camera) {
         Moves.Move m = MoveFactory.get(spec);
         double age = state.getGeckolibData(AGE);
-        double[] at = m.at(MoveFactory.tau(spec, age));
+        double tau = MoveFactory.tau(spec, age);
+        double[] at = m.at(tau);
         double s = at[0];
+        Integer pid = state.getGeckolibData(ID);
+        Moves.Move.PhaseAt phase = m.phaseAt(tau);
+        if (!phase.name().equals(PHASE_LAST.put(pid, phase.name()))) {   // the mouth rework attaches to these changes
+            if (PHASE_LAST.size() > 64) { PHASE_LAST.clear(); PHASE_LAST.put(pid, phase.name()); }
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} phase {} t={}s (phase length {}s, script time {}s)", m.label(), phase.name(),
+                    String.format("%.2f", phase.t()), String.format("%.2f", phase.duration()), String.format("%.2f", tau));
+        }
         int n = WormMath.faceCount(m.width);
         double linerMode = spec.p(16, 1);
         Integer id = state.getGeckolibData(ID);

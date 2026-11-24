@@ -12,7 +12,20 @@ import com.paulorchard.islandcraft.wormsofarrakis.geometry.ScaleMath;
  */
 public final class Moves {
     public static final double TUNNEL_LEAD = 10.0;
-    public static final double EMERGE_PAUSE = 1.0, CRASH_PAUSE = 2.0;
+    public static final double EMERGE_PAUSE = 1.0, CRASH_PAUSE = 2.0, CREST_PAUSE = 0.0, ENGULF_PAUSE = 1.5;
+    public static final double DEFAULT_EXPOSED = 2, ENGULF_MAX_EXPOSED = 3, ENGULF_FORCE_MAX_EXPOSED = 6, ENGULF_HOLD = 0.5, DEFAULT_ENGULF_LEAN = 7;
+    public static final double MAX_SPEED = 64;
+    public static final double DEFAULT_CREST_HEIGHT = 0.4, DEFAULT_EMERGE_N = 10, DEFAULT_EMERGE_ANGLE = 90, DEFAULT_EMERGE_HOLD = 2;
+
+    /** Exposed rings (real number) for a head tip height in body widths: (n + HEAD_LENGTH) x sin(angle) = height x width. */
+    public static double emergeRingsForHeight(double width, double heightWidths, double angleDeg) {
+        return heightWidths * width / Math.sin(Math.toRadians(angleDeg)) - HeadSpec.headLength(width);
+    }
+
+    /** Head tip height in body widths for n exposed rings at the hold: (n + HEAD_LENGTH) x sin(angle) / width. */
+    public static double emergeHeightForRings(double width, int n, double angleDeg) {
+        return (n + HeadSpec.headLength(width)) * Math.sin(Math.toRadians(angleDeg)) / width;
+    }
     public static final double MIN_SPEED = 0.5;
 
     private Moves() {}
@@ -40,6 +53,67 @@ public final class Moves {
         public int segmentsNeededFall;
         public double[] tTab, sTab;      // crash: ballistic time table
         public double advanceTime, cycle;
+        // prompt 07: rest between loops, the way back of emerge, the crest apex, the straight drop of engulf
+        public double pause, retreatSpeed, retreatTime, sApex = Double.NaN;
+        public double dropAngleSin = 1.0;
+
+        /** Name of the command this move comes from (the mode of the spec is internal: fall = crash, proj = crashproj, crash = crasharc). */
+        public String label() {
+            return switch (kind) {
+                case "fall" -> "crash";
+                case "proj" -> "crashproj";
+                case "crash" -> "crasharc";
+                default -> kind;
+            };
+        }
+
+        /** Sets the rest between loops; the loop period changes by exactly the difference. */
+        public void setPause(double seconds) {
+            cycle += seconds - pause;
+            pause = seconds;
+        }
+
+        /** Seconds from the start of the loop until everything is under the sand again (the loop without its rest). */
+        public double playTime() { return cycle - pause; }
+
+        /** One named phase of the loop and its length in seconds. */
+        public record Phase(String name, double duration) {}
+
+        /** The phase at an instant: its name, the time inside it and its length. */
+        public record PhaseAt(String name, double t, double duration) {}
+
+        /** The phases of one loop in order (a phase of length 0 is listed but never reported by {@link #phaseAt}). */
+        public java.util.List<Phase> phases() {
+            switch (kind) {
+                case "crest": {
+                    double rise = Math.max(0, Math.min(advanceTime, (sApex - s0) / speed));
+                    return java.util.List.of(new Phase("rise", rise), new Phase("fall", advanceTime - rise), new Phase("pause", pause));
+                }
+                case "emerge":
+                    return java.util.List.of(new Phase("rise", advanceTime), new Phase("hold", hold), new Phase("retreat", retreatTime), new Phase("pause", pause));
+                case "fall":
+                    return java.util.List.of(new Phase("rise", advanceTime), new Phase("hold", hold), new Phase("fall", fallTime), new Phase("pause", pause));
+                case "engulf":
+                    return java.util.List.of(new Phase("rise", advanceTime), new Phase("hold", hold), new Phase("drop", fallTime), new Phase("pause", pause));
+                default:
+                    return java.util.List.of(new Phase("run", advanceTime), new Phase("pause", pause));
+            }
+        }
+
+        /** Phase name, time inside it and its length at script time tau (loops). */
+        public PhaseAt phaseAt(double tau) {
+            double t = tau % cycle;
+            if (t < 0) t += cycle;
+            PhaseAt last = null;
+            double start = 0;
+            for (Phase p : phases()) {
+                if (p.duration() <= 0) continue;
+                last = new PhaseAt(p.name(), t - start, p.duration());
+                if (t < start + p.duration()) return last;
+                start += p.duration();
+            }
+            return last == null ? new PhaseAt("pause", 0, 0) : last;
+        }
 
         /** {s, phase} at script time tau seconds (loops). Phase: 0 advance/run, 1 hold, 2 retreat, 3 pause. */
         public double[] at(double tau) {
@@ -47,7 +121,15 @@ public final class Moves {
             if (t < 0) t += cycle;
             switch (kind) {
                 case "crest":
+                    if (t >= advanceTime) return new double[]{sEnd, 3};
                     return new double[]{s0 + speed * t, 0};
+                case "engulf": {
+                    if (t < advanceTime) return new double[]{s0 + speed * t, 0};
+                    if (t < advanceTime + hold) return new double[]{sHold, 1};
+                    double tf = t - advanceTime - hold;
+                    if (tf < fallTime) return new double[]{sHold - 0.5 * gravity * tf * tf / dropAngleSin, 2};
+                    return new double[]{sHold - dropEnd / dropAngleSin, 3};
+                }
                 case "fall": {
                     if (t < advanceTime) return new double[]{s0 + speed * t, 0};
                     if (t < advanceTime + hold) return new double[]{sHold, 1};
@@ -58,7 +140,7 @@ public final class Moves {
                 case "emerge":
                     if (t < advanceTime) return new double[]{s0 + speed * t, 0};
                     if (t < advanceTime + hold) return new double[]{sHold, 1};
-                    if (t < 2 * advanceTime + hold) return new double[]{sHold - speed * (t - advanceTime - hold), 2};
+                    if (t < advanceTime + hold + retreatTime) return new double[]{sHold - retreatSpeed * (t - advanceTime - hold), 2};
                     return new double[]{s0, 3};
                 default:
                     if (t >= advanceTime) return new double[]{sEnd, 3};
@@ -146,7 +228,7 @@ public final class Moves {
 
         /** Script time of the normalised time t in [0, 1]. */
         public double tauAt(double t) {
-            if (fam != null) return t >= 5 ? advanceTime + 0.5 * hold : advanceTime + hold + Math.max(0, Math.min(1, t)) * fallTime;
+            if (fam != null || kind.equals("engulf")) return t >= 5 ? advanceTime + 0.5 * hold : advanceTime + hold + Math.max(0, Math.min(1, t)) * fallTime;
             double[] w = window();
             return w[0] + Math.max(0, Math.min(1, t)) * (w[1] - w[0]);
         }
@@ -183,13 +265,15 @@ public final class Moves {
 
         public Frame frame(double t) {
             if (fam != null) return fallFrame(t);
-            double s = at(tauAt(t))[0];
+            double tauv = tauAt(t);
+            double s = at(tauv)[0];
             double[] tp = tip(s);
             double z0 = tip(at(tauAt(0))[0])[0];
             WormPose p = pose(s);
             double[] from = {0, p.joints[0][1], p.joints[0][2]};
             double sf = WormPose.ahead(path, s, from, HeadSpec.CONE_HEIGHT * r0);
-            return new Frame(t, tp[1] / width, Math.toDegrees(path.theta(sf)), (tp[0] - z0) / width, p.exposedBody(0));
+            String extra = kind.equals("engulf") ? String.format(java.util.Locale.ROOT, " exposed=%d tipHeight=%.2fblocks phase=%s", p.exposedBody(0), tp[1], phaseAt(tauv).name()) : "";
+            return new Frame(t, tp[1] / width, Math.toDegrees(path.theta(sf)), (tp[0] - z0) / width, p.exposedBody(0), extra);
         }
     }
 
@@ -237,6 +321,8 @@ public final class Moves {
         m.sEnd = TUNNEL_LEAD + 2 * Ru * Math.toRadians(b1) + 2 * Rd * Math.toRadians(b2) + segments + HeadSpec.headLength(width) + 2 * r0 + 4;
         m.advanceTime = (m.sEnd - m.s0) / m.speed;
         m.cycle = m.advanceTime;
+        m.pause = CREST_PAUSE;
+        m.sApex = TUNNEL_LEAD + 2 * Ru * Math.toRadians(b1);
         // where the top of the body crosses the base level on the way up and down
         double top = r0 + rise(), prev = p.pos(0)[1] + top;
         double sIn = Double.NaN, sOut = Double.NaN;
@@ -337,6 +423,7 @@ public final class Moves {
         m.sEnd = m.sTab[cnt];
         m.advanceTime = m.tTab[cnt];
         m.cycle = m.advanceTime + CRASH_PAUSE;
+        m.pause = CRASH_PAUSE;
         // most body rings above the base level: scan the flight coarsely and the landing finely (the maximum is around the landing)
         int best = 0;
         double step = Math.max(0.5, para.len() / 40);
@@ -407,6 +494,7 @@ public final class Moves {
         m.dropEnd = H - hEnd;
         m.fallTime = Math.sqrt(2 * m.dropEnd / gravity);
         m.cycle = m.advanceTime + holdSeconds + m.fallTime + CRASH_PAUSE;
+        m.pause = CRASH_PAUSE;
         m.segmentsNeededFall = m.fam.segmentsNeeded(H);
         m.segmentsNeeded = m.segmentsNeededFall;
         if (segments < m.segmentsNeededFall && !force) {
@@ -443,6 +531,11 @@ public final class Moves {
 
     /** Emerge: curve up to angleDeg, cross straight, stop when exactly n segments are above the surface, hold, retreat. */
     public static Move emerge(double width, int segments, int n, double angleDeg, double speed, double hold, double underRadiusWidths, boolean force) {
+        return emerge(width, segments, n, angleDeg, speed, hold, speed, underRadiusWidths, force);
+    }
+
+    /** Emerge with its own speed for the way back (blocks per second, prompt 07); retreatSpeed = speed gives the old move. */
+    public static Move emerge(double width, int segments, int n, double angleDeg, double speed, double hold, double retreatSpeed, double underRadiusWidths, boolean force) {
         if (n < 1) throw new Rejected("n must be at least 1");
         if (segments < n + 2 && !force) throw new Rejected("the worm needs at least n + 2 = " + (n + 2) + " segments (the head ring and n body rings)");
         if (angleDeg < 5 || angleDeg > 90) throw new Rejected("angle must be between 5 and 90 degrees");
@@ -467,7 +560,62 @@ public final class Moves {
         m.sEnd = m.sHold;
         m.hold = hold;
         m.advanceTime = (m.sHold - m.s0) / m.speed;
-        m.cycle = 2 * m.advanceTime + hold + EMERGE_PAUSE;
+        m.retreatSpeed = Math.max(retreatSpeed, MIN_SPEED);
+        m.retreatTime = (m.sHold - m.s0) / m.retreatSpeed;
+        m.cycle = m.advanceTime + hold + m.retreatTime + EMERGE_PAUSE;
+        m.pause = EMERGE_PAUSE;
+        return m;
+    }
+
+    /**
+     * Engulf (prompt 07): the head (mouth) and 1 to 3 body rings come out of the ground, then go back down. Rise: as emerge, head-leading,
+     * straight at 90 - lean degrees at speed blocks per second until {@code exposed} body rings are above the sand. Hold. Drop: from rest the
+     * head tip height falls freely, h = h0 - g t^2 / 2, the body following the same straight line (path position back by
+     * (h0 - h) / sin(angle)); no hook, no pose family. The drop ends when the head tip is HEAD_LENGTH + 1 below the sand.
+     */
+    public static Move engulf(double width, int segments, int exposed, double leanDeg, double holdSeconds, double speed, double gravity,
+                              double underRadiusWidths, boolean force) {
+        if (exposed < 1) throw new Rejected("exposed must be at least 1 body ring");
+        if (exposed > ENGULF_FORCE_MAX_EXPOSED) throw new Rejected("exposed must be at most " + (int) ENGULF_FORCE_MAX_EXPOSED + " body rings, even with force");
+        if (exposed > ENGULF_MAX_EXPOSED && !force) throw new Rejected("exposed must be 1 to " + (int) ENGULF_MAX_EXPOSED + " body rings (the mouth and a few rings); use force for up to " + (int) ENGULF_FORCE_MAX_EXPOSED);
+        if (leanDeg < 0 || leanDeg > 45) throw new Rejected("lean must be between 0 and 45 degrees");
+        if (holdSeconds < 0) throw new Rejected("hold must be 0 or more seconds");
+        if (gravity <= 0) throw new Rejected("gravity must be above 0");
+        if (segments < exposed + 2 && !force) throw new Rejected("the worm needs at least exposed + 2 = " + (exposed + 2) + " segments (the head ring and the exposed body rings); add force to build it anyway");
+        double angle = 90 - leanDeg, a = Math.toRadians(angle);
+        Move m = new Move();
+        common(m, "engulf", width, segments, exposed, speed);
+        double hl = HeadSpec.headLength(width);
+        double ur = underRadiusWidths * width;
+        m.underRadius = ur;
+        // the straight stretch below the crossing must hold the whole drop (head tip HEAD_LENGTH + 1 below the sand, the head ring behind it)
+        double depth = Math.min(ascentDepth(width, m.r0, angle, ur), -((hl + 2 + 2 * m.r0) * Math.sin(a) + ur * (1 - Math.cos(a))));
+        double yEnd = depth + ur * (1 - Math.cos(a));
+        double straightBelow = -yEnd / Math.sin(a);
+        double upLen = straightBelow + exposed + hl + 2 * width + 10;
+        PlanarPath p = PlanarPath.start(0, depth, 0).line(TUNNEL_LEAD).arc(ur, angle).line(upLen).build();
+        m.path = p;
+        m.tunnelDepth = depth;
+        m.sCross1 = TUNNEL_LEAD + ur * a + straightBelow;
+        int seg = Math.max(segments, exposed + 3);
+        double sa = firstReach(p, m.sCross1, m.sCross1 + upLen, exposed, seg);
+        double sb = firstReach(p, sa, m.sCross1 + upLen + 4 * exposed, exposed + 1, seg);
+        m.sHold = 0.5 * (sa + sb);
+        m.sEnd = m.sHold;
+        m.hold = holdSeconds;
+        m.advanceTime = (m.sHold - m.s0) / m.speed;
+        m.riseTime = m.advanceTime;
+        m.gravity = gravity;
+        m.leanDeg = leanDeg;
+        m.angleDeg = angle;
+        m.dropAngleSin = Math.sin(a);
+        m.h0 = m.tip(m.sHold)[1];
+        m.dropEnd = m.h0 + hl + 1;
+        m.fallTime = Math.sqrt(2 * m.dropEnd / gravity);
+        m.cycle = m.advanceTime + holdSeconds + m.fallTime + ENGULF_PAUSE;
+        m.pause = ENGULF_PAUSE;
+        m.segmentsNeeded = exposed + 2;
+        m.exposedMax = exposed;
         return m;
     }
 
@@ -542,6 +690,7 @@ public final class Moves {
             m.advanceTime = m.tTab[cnt];
         }
         m.cycle = m.advanceTime + CRASH_PAUSE;
+        m.pause = CRASH_PAUSE;
         return m;
     }
 }

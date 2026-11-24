@@ -4,6 +4,7 @@ import com.geckolib.animatable.GeoEntity;
 import com.geckolib.animatable.instance.AnimatableInstanceCache;
 import com.geckolib.animatable.manager.AnimatableManager;
 import com.geckolib.util.GeckoLibUtil;
+import com.paulorchard.islandcraft.wormsofarrakis.WormsOfArrakis;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -32,6 +33,35 @@ public class TestWormEntity extends Entity implements GeoEntity {
         super(type, level);
         this.noPhysics = true;
         this.setNoGravity(true);
+    }
+
+    private String watchedSpec = "";
+    private boolean removeAtEnd;
+
+    /** Server side: a move with loop=off plays once; MoveFactory.finished says when its run is over, then the worm is removed. */
+    @Override
+    public void tick() {
+        super.tick();
+        if (!(this.level() instanceof ServerLevel)) return;
+        String sp = getSpecString();
+        if (!sp.equals(watchedSpec)) {
+            watchedSpec = sp;
+            removeAtEnd = false;
+            try {
+                if (sp.startsWith("move;")) removeAtEnd = WormSpec.parse(sp).p(19, 1) <= 0;
+            } catch (RuntimeException e) {
+                removeAtEnd = false;
+            }
+        }
+        if (!removeAtEnd) return;
+        try {
+            if (MoveFactory.finished(WormSpec.parse(sp), this.tickCount)) {
+                WormsOfArrakis.LOGGER.info("[WormsOfArrakis] loop=off: {} finished its single run at age {} ticks, worm removed", sp.split(";")[1], this.tickCount);
+                this.discard();
+            }
+        } catch (RuntimeException e) {
+            removeAtEnd = false;
+        }
     }
 
     public String getSpecString() {

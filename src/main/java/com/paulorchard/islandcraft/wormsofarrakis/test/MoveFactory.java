@@ -14,7 +14,9 @@ import java.util.Map;
  * p0 width  p1 segments  p2 crest_fraction | n  p3 angle  p4 speed  p5 hold  p6 gravity  p7 top_speed
  * p8 mouth open (1/0)  p9 ballistic (1/0)  p10 force (1/0)  p11 time ratio  p12 age at last speed change (ticks)
  * p13 script time at that moment (s)  p14 under_radius_widths  p15 top_radius_factor  p16 liner (1 tiled, 2 dark, 0 off)
+ * p17 freeze t (-1 off)  p18 pause s (-1 = the move's default)  p19 loop (1 on, 0 off)  p20 retreat speed (0 = same as speed)
  * </pre>
+ * Modes: crest, emerge, fall (the crash command), engulf, proj (crashproj), crash (crasharc). Engulf reads p2 exposed, p3 lean, p4 speed, p5 hold, p6 gravity.
  * The script time is tau = p13 + p11 * (age - p12) / 20, so the speed command changes p11/p12/p13 without a jump.
  */
 public final class MoveFactory {
@@ -29,17 +31,42 @@ public final class MoveFactory {
                 force ? 1 : 0, 1, 0, 0, underRadiusWidths, topRadiusFactor, liner);
     }
 
+    /**
+     * Prompt 07: the spec with the extra variables. p17 freeze (-1), p18 pause seconds (-1 = the move's own default), p19 loop (1 on, 0 off),
+     * p20 retreat speed (0 = same as speed). When all three are at their defaults the spec is exactly the older, shorter one.
+     */
+    public static WormSpec specFull(String mode, double width, int segments, double p2, double angle, double speed, double hold, double gravity,
+                                    double topSpeed, boolean mouthOpen, boolean ballistic, boolean force, double underRadiusWidths,
+                                    double topRadiusFactor, double liner, double pause, boolean loop, double retreatSpeed) {
+        WormSpec base = spec(mode, width, segments, p2, angle, speed, hold, gravity, topSpeed, mouthOpen, ballistic, force, underRadiusWidths, topRadiusFactor, liner);
+        if (pause < 0 && loop && retreatSpeed <= 0) return base;
+        double[] p = java.util.Arrays.copyOf(base.p(), 21);
+        p[17] = -1;
+        p[18] = pause;
+        p[19] = loop ? 1 : 0;
+        p[20] = retreatSpeed;
+        return new WormSpec(base.kind(), base.mode(), p);
+    }
+
     /** @throws Moves.Rejected when the move cannot satisfy the curvature rule (and force is off) */
     public static Moves.Move build(WormSpec s) {
+        Moves.Move m = build0(s);
+        double pause = s.p(18, -1);
+        if (pause >= 0) m.setPause(pause);
+        return m;
+    }
+
+    private static Moves.Move build0(WormSpec s) {
         double width = s.p(0, 16);
         int segs = (int) s.p(1, 60);
         boolean force = s.p(10, 0) > 0;
         return switch (s.mode()) {
             case "crest" -> {
                 double up = s.p(3, 6);
-                yield Moves.crest(width, segs, s.p(2, 0.4), up, s.p(6, 0) > 0 ? s.p(6, 0) : up, s.p(4, 12), force);
+                yield Moves.crest(width, segs, s.p(2, Moves.DEFAULT_CREST_HEIGHT), up, s.p(6, 0) > 0 ? s.p(6, 0) : up, s.p(4, 12), force);
             }
-            case "emerge" -> Moves.emerge(width, segs, (int) s.p(2, 10), s.p(3, 90), s.p(4, 12), s.p(5, 2), s.p(14, 1.0), force);
+            case "emerge" -> Moves.emerge(width, segs, (int) s.p(2, 10), s.p(3, 90), s.p(4, 12), s.p(5, 2), s.p(20, 0) > 0 ? s.p(20, 0) : s.p(4, 12), s.p(14, 1.0), force);
+            case "engulf" -> Moves.engulf(width, segs, (int) s.p(2, Moves.DEFAULT_EXPOSED), s.p(3, Moves.DEFAULT_ENGULF_LEAN), s.p(5, Moves.ENGULF_HOLD), s.p(4, 12), s.p(6, 12), s.p(14, 1.0), force);
             case "fall" -> Moves.fall(width, segs, s.p(2, 2.5), s.p(3, 7), s.p(5, 1.5), s.p(4, 12), s.p(6, 12), s.p(15, 2.0), s.p(14, 1.0), force);
             case "proj" -> Moves.projectile(width, segs, s.p(2, 2.5), s.p(3, 40), s.p(6, 12), s.p(14, 1.0), force);
             case "crash" -> Moves.crash(width, segs, (int) s.p(2, 10), s.p(3, 70), s.p(4, 12), s.p(6, 12), s.p(7, 4), s.p(15, 1.0), s.p(14, 1.0),
@@ -66,7 +93,22 @@ public final class MoveFactory {
     public static double tau(WormSpec s, double age) {
         double fz = s.p(17, -1);
         if (fz >= 0) return get(s).tauAt(fz);
+        double t = rawTau(s, age);
+        if (s.p(19, 1) <= 0) t = Math.min(t, get(s).playTime() - 1e-6);   // loop off: stay at the end (under the sand) until the server removes the worm
+        return t;
+    }
+
+    private static double rawTau(WormSpec s, double age) {
         return s.p(13, 0) + s.p(11, 1) * (age - s.p(12, 0)) / 20.0;
+    }
+
+    /** Seconds the server waits after the end of a loop=off worm before removing it (the client already shows it under the sand). */
+    public static final double REMOVE_MARGIN = 0.5;
+
+    /** True for a loop=off worm (not frozen) whose single run is over. */
+    public static boolean finished(WormSpec s, double age) {
+        if (s.p(19, 1) > 0 || s.p(17, -1) >= 0) return false;
+        return rawTau(s, age) >= get(s).playTime() + REMOVE_MARGIN;
     }
 
     /** Loose half extent (blocks) of everything the move draws above the sand, measured from the entity position. */
