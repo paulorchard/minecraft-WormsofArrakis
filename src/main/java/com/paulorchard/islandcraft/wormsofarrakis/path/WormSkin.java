@@ -1,7 +1,7 @@
 package com.paulorchard.islandcraft.wormsofarrakis.path;
 
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.ChainMath;
-import com.paulorchard.islandcraft.wormsofarrakis.geometry.HeadFlaps;
+import com.paulorchard.islandcraft.wormsofarrakis.geometry.HeadMouth;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.ScaleMath;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.ShingleMath;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.Stagger;
@@ -42,12 +42,18 @@ public final class WormSkin {
         ChainMath chain = pose.chain(r0);
         if (first < 0) return new WormSkin(pose, chain, drawn, 0, -1, new ShingleMath.Result(), 0);
         int from = Math.max(0, first - 1), to = Math.min(pose.segments - 1, last + 1);
-        ShingleMath.Result res = ShingleMath.build(chain, n, r0, 1, options, from, to);
-        int before = res.quads;
-        if (from == 0) {
-            HeadFlaps.append(res, chain, n, r0, Stagger.ringDelta(options.seed(), 0, n, options.stagger()), HeadSpec.CONE_HEIGHT * r0, mouthOpenDeg, options);
-        }
-        return new WormSkin(pose, chain, drawn, from, to, res, res.quads - before);
+        // prompt 08: every ring takes the one uniform roll that puts the upper jaw on top; the mouth itself (shell, throat, teeth) is HeadMouth,
+        // built in the head's local frame and cached per angle by the renderer, so the flaps are no longer part of this result
+        ShingleMath.Result res = ShingleMath.build(chain, n, r0, 1, options.withRoll(HeadMouth.roll(n)), from, to);
+        return new WormSkin(pose, chain, drawn, from, to, res, 0);
+    }
+
+    /** True when the head ring (segment 0) is part of this skin, i.e. the mouth is to be drawn. */
+    public boolean hasHead() { return to >= from && from == 0; }
+
+    /** The angle of ring vertex 0 of the head ring in its local frame: the ring's own stagger plus the uniform roll. */
+    public static double headDelta(ShingleMath.Options options, int n) {
+        return Stagger.ringDelta(options.seed(), 0, n, options.stagger()) + HeadMouth.roll(n);
     }
 
     public static ShingleMath.Options defaultOptions(boolean liner) {

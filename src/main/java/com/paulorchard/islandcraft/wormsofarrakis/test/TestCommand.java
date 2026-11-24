@@ -14,6 +14,7 @@ import com.paulorchard.islandcraft.wormsofarrakis.geometry.ScaleMath;
 import com.paulorchard.islandcraft.wormsofarrakis.path.FallFamily;
 import com.paulorchard.islandcraft.wormsofarrakis.path.HeadSpec;
 import com.paulorchard.islandcraft.wormsofarrakis.path.Moves;
+import com.paulorchard.islandcraft.wormsofarrakis.path.MouthAnim;
 import com.paulorchard.islandcraft.wormsofarrakis.path.WorldBase;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.WormMath;
 import net.minecraft.commands.CommandSourceStack;
@@ -72,7 +73,9 @@ final class TestCommand {
                 new Arg("closer", StringArgumentType.word()), new Arg("force", StringArgumentType.word()))));
         // The four moves take keyed options in any order, parsed by MoveOptions; the keys, ranges and defaults live in its table only
         // (the usage strings and the moves command are generated from it). Run /arrakis_worm_test moves to list them.
-        //   crest   height=0.4 (above 0 to 3, force lifts the 3) radius=6 radius_down=<radius> speed pause=0 loop mouth=closed
+        //   crest   height=0.4 (above 0 to 3, force lifts the 3) radius=6 radius_down=<radius> speed pause=0 loop mouth=anim
+        // every move also takes the mouth keys (prompt 08): mouth=anim|open|closed close_time=0.9 close_end=0 (crest 0.3) open_deg=45 teeth=on|off;
+        // /arrakis_worm_test mouthpose <0..1|off> holds the closing at a fraction for photographs
         //   emerge  n=10 | height  angle=90 hold=2 speed retreat_speed=<speed> pause=1 loop mouth
         //   crash   height=2.5 lean=7 hold=1.5 speed gravity=12 min_radius=2 pause=2 loop mouth
         //   engulf  exposed=2 lean=7 hold=0.5 speed gravity=12 pause=1.5 loop mouth
@@ -171,6 +174,8 @@ final class TestCommand {
         root.then(Commands.literal("offset").then(Commands.argument("value", StringArgumentType.word()).executes(ctx -> offsetCmd(ctx, -1L))
                 .then(Commands.argument("seed", com.mojang.brigadier.arguments.LongArgumentType.longArg(0)).executes(ctx -> offsetCmd(ctx, com.mojang.brigadier.arguments.LongArgumentType.getLong(ctx, "seed"))))));
         root.then(Commands.literal("freeze").then(Commands.argument("t", StringArgumentType.word()).executes(TestCommand::freezeCmd)));
+        // prompt 08: hold the mouth at a fraction of its closing (0 = fully open at open_deg, 1 = fully closed), or release it
+        root.then(Commands.literal("mouthpose").then(Commands.argument("value", StringArgumentType.word()).executes(TestCommand::mouthPoseCmd)));
         root.then(branch("mouth", 2, List.of(w("width"), new Arg("action", StringArgumentType.word()))));
         root.then(Commands.literal("clear").executes(ctx -> {
             int n = 0;
@@ -264,6 +269,35 @@ final class TestCommand {
         return changed;
     }
 
+    /** mouthpose <0..1|off>: every moving worm holds its mouth at that fraction of the closing (for photographing the shapes); off = the animation again. */
+    private static int mouthPoseCmd(CommandContext<CommandSourceStack> ctx) {
+        String v = StringArgumentType.getString(ctx, "value");
+        double f = -1;
+        if (!v.equals("off")) {
+            try {
+                f = Double.parseDouble(v);
+            } catch (NumberFormatException e) {
+                return fail(ctx, "mouthpose <0..1|off>: 0 = fully open, 1 = fully closed, off = the animation");
+            }
+            if (Double.isNaN(f) || f < 0 || f > 1) return fail(ctx, "mouthpose must be between 0 (open) and 1 (closed), or off; got " + v);
+        }
+        int n = 0;
+        double angle = Double.NaN;
+        for (net.minecraft.world.entity.Entity e : ctx.getSource().getLevel().getAllEntities()) {
+            if (!(e instanceof TestWormEntity w) || !w.getSpecString().startsWith("move;")) continue;
+            WormSpec s = WormSpec.parse(w.getSpecString());
+            w.setSpec(MoveFactory.withMouthPose(s, f));
+            if (f >= 0) angle = s.p(23, HeadSpec.OPEN_DEGREES) * (1 - f);
+            n++;
+        }
+        int changed = n;
+        String msg = f < 0 ? "mouthpose off: " + changed + " moving worms animate again"
+                : changed == 0 ? "mouthpose " + v + ": no moving worms to hold (spawn one first)"
+                : String.format(Locale.ROOT, "mouthpose %s: %d moving worms hold the mouth at %.1f deg (0 = open, 1 = closed)", v, changed, angle);
+        notice(ctx, msg);
+        return changed;
+    }
+
     /** True when the command carries the word force in any of its free-text arguments. */
     private static boolean hasForce(CommandContext<CommandSourceStack> ctx) {
         for (String name : new String[]{"force", "plane", "liner", "closer"}) {
@@ -341,6 +375,15 @@ final class TestCommand {
         for (Moves.Move.Phase p : m.phases()) ph.append(' ').append(p.name()).append('=').append(String.format(Locale.ROOT, "%.2f", p.duration())).append('s');
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} phases:{} (loop {}s, pause {}s, loop={}, retreatSpeed={})", m.label(), ph, String.format(Locale.ROOT, "%.2f", m.cycle),
                 m.pause, s.p(19, 1) > 0 ? "on" : "off", m.kind.equals("emerge") ? trim(m.retreatSpeed) : "n/a");
+        if ((int) s.p(8, 0) == MoveFactory.MOUTH_ANIM && !m.kind.equals("proj") && !m.kind.equals("crash")) {
+            MouthAnim.Timing g = MoveFactory.mouthTiming(s);
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} mouth: anim openDeg={} apex={}s closeStart={}s closeEnd={}s closeTime={}s{} teeth={} (open at the start of every loop, closes once, then no mouth animation until the loop restarts)",
+                    m.label(), trim(s.p(23, HeadSpec.OPEN_DEGREES)), String.format(Locale.ROOT, "%.2f", g.apex()), String.format(Locale.ROOT, "%.2f", g.tStart()),
+                    String.format(Locale.ROOT, "%.2f", g.tEnd()), String.format(Locale.ROOT, "%.2f", g.closeTime()), g.clamped() ? " (clamped: the rise is shorter than close_time)" : "",
+                    MoveFactory.teethOn(s) ? "on" : "off");
+        } else {
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} mouth: static {} teeth={}", m.label(), (int) s.p(8, 0) == MoveFactory.MOUTH_OPEN ? "open " + trim(s.p(23, HeadSpec.OPEN_DEGREES)) + " deg" : "closed", MoveFactory.teethOn(s) ? "on" : "off");
+        }
         int frames = m.fam != null || m.kind.equals("engulf") ? 4 : 3;
         for (int i = 0; i <= frames; i++) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} {}", m.kind, m.frame(i / (double) frames).line());
     }
@@ -548,6 +591,10 @@ final class TestCommand {
                     return 0;
                 }
                 if (!mv.note.isEmpty()) notice(ctx, kind + ": " + mv.note);
+                if ((int) ms.p(8, 0) == MoveFactory.MOUTH_ANIM) {
+                    MouthAnim.Timing g = MoveFactory.mouthTiming(ms);
+                    if (g.clamped()) notice(ctx, String.format(Locale.ROOT, "%s: the rise (%.2f s until the closing ends) is shorter than close_time=%s; the mouth closes in %.2f s instead", kind, g.tEnd(), trim(ms.p(21, MouthAnim.DEFAULT_CLOSE_TIME)), g.closeTime()));
+                }
                 spec = ms;
                 reach = Math.max(25.0, width * 1.2 + 15);
                 axisShift = MoveFactory.centreZ(ms);

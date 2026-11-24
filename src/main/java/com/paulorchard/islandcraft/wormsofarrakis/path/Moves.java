@@ -226,6 +226,23 @@ public final class Moves {
             return window;
         }
 
+        private double apexTime = Double.NaN;
+
+        /**
+         * Prompt 08: the instant the mouth law counts from. Crest: the instant the head tip is at its highest (scanned every 5 ms of the rise).
+         * Emerge, crash and engulf: the end of the rise, the start of the hold. Crashproj and crasharc: the end of the run (their mouth is static).
+         */
+        public synchronized double apexTime() {
+            if (!Double.isNaN(apexTime)) return apexTime;
+            if (!kind.equals("crest")) return apexTime = advanceTime;
+            double best = -1e18, at = 0;
+            for (double t = 0; t <= advanceTime; t += 0.005) {
+                double y = tip(s0 + speed * t)[1];
+                if (y > best) { best = y; at = t; }
+            }
+            return apexTime = at;
+        }
+
         /** Script time of the normalised time t in [0, 1]. */
         public double tauAt(double t) {
             if (fam != null || kind.equals("engulf")) return t >= 5 ? advanceTime + 0.5 * hold : advanceTime + hold + Math.max(0, Math.min(1, t)) * fallTime;
@@ -589,7 +606,12 @@ public final class Moves {
         double ur = underRadiusWidths * width;
         m.underRadius = ur;
         // the straight stretch below the crossing must hold the whole drop (head tip HEAD_LENGTH + 1 below the sand, the head ring behind it)
-        double depth = Math.min(ascentDepth(width, m.r0, angle, ur), -((hl + 2 + 2 * m.r0) * Math.sin(a) + ur * (1 - Math.cos(a))));
+        // (prompt 08: written from the end rule instead of the old 2 r0 + 2, which the longer head (cone 1.0 R) outgrew: at the end the head tip is
+        // HEAD_LENGTH + 1 under the sand, the head ring's front edge is one cone behind it along the line, and 3 blocks of the body behind that must
+        // still be in the straight part; plus 0.5 block of slack)
+        double cone = HeadSpec.coneHeight(width);
+        double need = hl + 1 + (cone + 3) * Math.sin(a) + 0.5;
+        double depth = Math.min(ascentDepth(width, m.r0, angle, ur), -(need + ur * (1 - Math.cos(a))));
         double yEnd = depth + ur * (1 - Math.cos(a));
         double straightBelow = -yEnd / Math.sin(a);
         double upLen = straightBelow + exposed + hl + 2 * width + 10;

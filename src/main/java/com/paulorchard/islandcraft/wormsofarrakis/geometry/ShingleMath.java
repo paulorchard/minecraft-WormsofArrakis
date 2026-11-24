@@ -37,18 +37,24 @@ public final class ShingleMath {
     private ShingleMath() {}
 
     public record Options(double baseLip, double overlapMargin, double maxLipFraction, double minLip, double maxCutFraction,
-                          double rimPx, double linerInset, boolean liner, double stagger, long seed, boolean offset, double jitter, int linerColor, double linerMargin) {
-        /** Plain geometry: no stagger, no tile variation, no jitter (the maths tests of prompts 02 and 03 use this). */
+                          double rimPx, double linerInset, boolean liner, double stagger, long seed, boolean offset, double jitter, int linerColor, double linerMargin,
+                          double roll) {
+        /** Plain geometry: no stagger, no tile variation, no jitter, no roll (the maths tests of prompts 02 and 03 use this). */
         public static Options defaults(double baseLip, boolean liner) {
-            return new Options(baseLip, OVERLAP_MARGIN, MAX_LIP_FRACTION, MIN_LIP, MAX_CUT_FRACTION, RIM_PX, 0.0, liner, 0.0, 0L, false, 0.0, LINER_TINT, LINER_MARGIN);
+            return new Options(baseLip, OVERLAP_MARGIN, MAX_LIP_FRACTION, MIN_LIP, MAX_CUT_FRACTION, RIM_PX, 0.0, liner, 0.0, 0L, false, 0.0, LINER_TINT, LINER_MARGIN, 0.0);
         }
 
         public Options withVariety(double stagger, long seed, boolean offset, double jitter) {
-            return new Options(baseLip, overlapMargin, maxLipFraction, minLip, maxCutFraction, rimPx, linerInset, liner, stagger, seed, offset, jitter, linerColor, linerMargin);
+            return new Options(baseLip, overlapMargin, maxLipFraction, minLip, maxCutFraction, rimPx, linerInset, liner, stagger, seed, offset, jitter, linerColor, linerMargin, roll);
         }
 
         public Options withLinerColor(int color) {
-            return new Options(baseLip, overlapMargin, maxLipFraction, minLip, maxCutFraction, rimPx, linerInset, liner, stagger, seed, offset, jitter, color, linerMargin);
+            return new Options(baseLip, overlapMargin, maxLipFraction, minLip, maxCutFraction, rimPx, linerInset, liner, stagger, seed, offset, jitter, color, linerMargin, roll);
+        }
+
+        /** Prompt 08: one uniform roll (radians, about the path axis) of every ring, added to the per-ring stagger; it puts the upper jaw on top. */
+        public Options withRoll(double rollRad) {
+            return new Options(baseLip, overlapMargin, maxLipFraction, minLip, maxCutFraction, rimPx, linerInset, liner, stagger, seed, offset, jitter, linerColor, linerMargin, rollRad);
         }
     }
 
@@ -57,7 +63,7 @@ public final class ShingleMath {
         public float[] v = new float[8 * 4 * 1024];
         public byte[] kind = new byte[1024];
         public int quads;
-        public final int[] byKind = new int[5];
+        public final int[] byKind = new int[16];
         /** gap[j][i] for joints j = 1..segments-1 (index 0 unused), per ring vertex; null entries for j = 0. */
         public double[][] gap;
         /** lip length chosen for the last plate of segment j-1 at joint j, per vertex. */
@@ -159,6 +165,7 @@ public final class ShingleMath {
             double[] u = Stagger.offsets(o.seed(), segs);
             for (int k = 0; k < segs; k++) res.ringDelta[k] = u[k] * o.stagger() * (2 * Math.PI / n);
         }
+        if (o.roll() != 0) for (int k = 0; k < segs; k++) res.ringDelta[k] += o.roll();   // uniform roll: every ring turns by the same angle
         double maxLip = o.maxLipFraction() * pitch;
 
         // pass 1: per-joint gaps, lips, cuts
@@ -260,7 +267,7 @@ public final class ShingleMath {
         }
         if (o.liner()) {
             // one ring of vertices per joint, shared by the liner segments on both sides (never rotated per ring)
-            double ph = Math.PI / n;   // the liner seams sit half a face away from the plate edges
+            double ph = Math.PI / n + o.roll();   // the liner seams sit half a face away from the plate edges (and turn with the roll)
             double[][][] joint = new double[segs + 1][][];
             res.linerJoint = joint;
             for (int k = Math.max(0, from); k <= Math.min(segs - 1, to); k++) {

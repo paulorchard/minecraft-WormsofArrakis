@@ -9,10 +9,10 @@ import com.paulorchard.islandcraft.wormsofarrakis.geometry.WormMath;
  * flaps), measured from the rear of the head ring to the flap tip.
  */
 public final class HeadSpec {
-    /** Closed flap cone height as a fraction of the ring radius. */
-    public static final double CONE_HEIGHT = 0.6;
-    /** Default opening angle of the flaps (degrees), the same as the prompt 01 mouth_open animation. */
-    public static final double OPEN_DEGREES = 70.0;
+    /** Closed flap cone height as a fraction of the ring radius (prompt 08: 0.6 -> 1.0, the owner-approved longer mandibles). */
+    public static final double CONE_HEIGHT = 1.0;
+    /** Largest opening angle of the flaps (degrees); the start angle of the closing animation (prompt 08: 70 -> 45). */
+    public static final double OPEN_DEGREES = 45.0;
     public static final int FLAPS = 3;
 
     private HeadSpec() {}

@@ -61,7 +61,7 @@ class Prompt04Test {
         assertArrayEquals(new int[]{50, 50, 50}, HeadFlaps.split(150));
         for (double w : new double[]{3, 16, 48}) {
             System.out.printf("[head] HEAD_LENGTH width %.0f: ring %.2f (R=%.2f, n=%d) + cone %.2f = %.2f%n", w, ScaleMath.PITCH, HeadSpec.ringRadius(w), WormMath.faceCount(w), HeadSpec.coneHeight(w), HeadSpec.headLength(w));
-            assertEquals(ScaleMath.PITCH + 0.6 * HeadSpec.ringRadius(w), HeadSpec.headLength(w), 1e-12);
+            assertEquals(ScaleMath.PITCH + 1.0 * HeadSpec.ringRadius(w), HeadSpec.headLength(w), 1e-12);   // prompt 08: cone 0.6 -> 1.0 R (old HEAD_LENGTH W3/16/48 = 1.97/5.78/15.3, new 2.62/8.96/24.9)
         }
     }
 
@@ -81,7 +81,7 @@ class Prompt04Test {
             Moves.Move[] moves = {Moves.crest(w, 60, 1.3, 6, 6, 12, false), Moves.emerge(w, 60, 10, 75, 12, 2, 1.0, false), Moves.crash(w, 400, 10, 70, 12, 12, 4, 1.0, 1.0, true, false)};
             for (Moves.Move m : moves) for (double f = 0; f <= 1; f += 0.05) {
                 double s = m.s0 + f * (m.sEnd - m.s0);
-                WormSkin k = WormSkin.build(m.pose(s), n, m.r0, SurfaceProvider.PLANE, opt(1.0, 3, true, 0.04), 70);
+                WormSkin k = WormSkin.build(m.pose(s), n, m.r0, SurfaceProvider.PLANE, opt(1.0, 3, true, 0.04), HeadSpec.OPEN_DEGREES);
                 if (k.from != 0 || k.to < 0) continue;
                 assertEquals(0, k.result.uncovered, m.kind + " w" + w + " s=" + s);
                 assertEquals(0, k.result.uncutIntersections, m.kind + " w" + w + " s=" + s);
@@ -98,7 +98,7 @@ class Prompt04Test {
     }
 
     @Test void flapHingeVerticesCoincideWithTheRingFrontVerticesAtEveryBend() {
-        for (double w : new double[]{3, 16, 48}) for (double[] pl : PLANES) for (double open : new double[]{0, 70}) for (double stagger : new double[]{0, 1.0}) {
+        for (double w : new double[]{3, 16, 48}) for (double[] pl : PLANES) for (double open : new double[]{0, HeadSpec.OPEN_DEGREES}) for (double stagger : new double[]{0, 1.0}) {
             int n = WormMath.faceCount(w);
             double r = WormMath.circumradius(n, 1.0);
             ChainMath c = curve(w, 6, BendLimit.MIN_BEND_RADIUS_WIDTHS, pl[0], pl[1]);
@@ -135,7 +135,9 @@ class Prompt04Test {
                     worst = Math.max(worst, best);
                 }
                 System.out.printf("[head] tip distance to path: %s width %.0f worst %.3f%n", m.kind, w, worst);
-                assertTrue(worst <= 0.05 * w + 0.1);
+                double cone = HeadSpec.coneHeight(w), coneOld = 0.6 * HeadSpec.ringRadius(w);
+                // prompt 08: the tip is the straight extension of the head ring over one cone; on the under-ground arc of radius 1 W it leaves the path by about cone^2 / (2 W), so the allowance grows by that for the longer cone (emerge W16: measured 2.09, was within 0.9)
+                assertTrue(worst <= 0.05 * w + 0.1 + (cone * cone - coneOld * coneOld) / (2 * w), "tip distance " + worst);
             }
         }
     }

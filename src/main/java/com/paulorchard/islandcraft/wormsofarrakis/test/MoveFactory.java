@@ -1,6 +1,7 @@
 package com.paulorchard.islandcraft.wormsofarrakis.test;
 
 import com.paulorchard.islandcraft.wormsofarrakis.path.HeadSpec;
+import com.paulorchard.islandcraft.wormsofarrakis.path.MouthAnim;
 import com.paulorchard.islandcraft.wormsofarrakis.path.Moves;
 import com.paulorchard.islandcraft.wormsofarrakis.path.PlanarPath;
 
@@ -48,6 +49,63 @@ public final class MoveFactory {
         return new WormSpec(base.kind(), base.mode(), p);
     }
 
+    /** Mouth modes of p8: 0 static closed, 1 static open, 2 the closing animation (prompt 08). */
+    public static final int MOUTH_CLOSED = 0, MOUTH_OPEN = 1, MOUTH_ANIM = 2;
+
+    /**
+     * Prompt 08: the mouth variables on top of a spec. p8 mode, p21 close_time, p22 close_end (-999 = the move's default), p23 open_deg,
+     * p24 teeth (1/0), p25 mouthpose (-1 off, else the held fraction 0..1 of the closing). A spec whose mouth keys are all at their
+     * defaults keeps the shorter older length (only p8 changes).
+     */
+    public static WormSpec withMouth(WormSpec base, int mode, double closeTime, double closeEnd, double openDeg, boolean teeth) {
+        double[] p = java.util.Arrays.copyOf(base.p(), Math.max(base.p().length, 17));
+        p[8] = mode;
+        boolean dflt = closeTime == MouthAnim.DEFAULT_CLOSE_TIME && closeEnd == MouthAnim.CLOSE_END_DEFAULT_MARK && openDeg == HeadSpec.OPEN_DEGREES && teeth;
+        if (dflt) return new WormSpec(base.kind(), base.mode(), p);
+        p = java.util.Arrays.copyOf(p, 26);
+        if (base.p().length <= 17) p[17] = -1;
+        if (base.p().length <= 18) p[18] = -1;
+        if (base.p().length <= 19) p[19] = 1;
+        p[21] = closeTime;
+        p[22] = closeEnd;
+        p[23] = openDeg;
+        p[24] = teeth ? 1 : 0;
+        p[25] = -1;
+        return new WormSpec(base.kind(), base.mode(), p);
+    }
+
+    /** The mouth pose command: holds the closing at a fraction (0 = open at open_deg, 1 = closed), or releases it (fraction < 0). */
+    public static WormSpec withMouthPose(WormSpec s, double fraction) {
+        double[] p = java.util.Arrays.copyOf(s.p(), 26);
+        if (s.p().length <= 17) p[17] = -1;
+        if (s.p().length <= 18) p[18] = -1;
+        if (s.p().length <= 19) p[19] = 1;
+        if (s.p().length <= 21) p[21] = MouthAnim.DEFAULT_CLOSE_TIME;
+        if (s.p().length <= 22) p[22] = MouthAnim.CLOSE_END_DEFAULT_MARK;
+        if (s.p().length <= 23) p[23] = HeadSpec.OPEN_DEGREES;
+        if (s.p().length <= 24) p[24] = 1;
+        p[25] = fraction;
+        return new WormSpec(s.kind(), s.mode(), p);
+    }
+
+    /** The mouth opening angle in degrees at script time tau: held pose, static open/closed, or the closing animation. */
+    public static double mouthAngle(WormSpec s, double tau) {
+        double open = s.p(23, HeadSpec.OPEN_DEGREES);
+        double pose = s.p(25, -1);
+        if (pose >= 0) return open * (1 - Math.max(0, Math.min(1, pose)));
+        int mode = (int) s.p(8, 0);
+        if (mode == MOUTH_CLOSED) return 0;
+        if (mode == MOUTH_OPEN) return open;
+        return MouthAnim.angleAt(get(s), tau, open, s.p(21, MouthAnim.DEFAULT_CLOSE_TIME), s.p(22, MouthAnim.CLOSE_END_DEFAULT_MARK));
+    }
+
+    /** The closing times of an animated spec. */
+    public static MouthAnim.Timing mouthTiming(WormSpec s) {
+        return MouthAnim.timing(get(s), s.p(21, MouthAnim.DEFAULT_CLOSE_TIME), s.p(22, MouthAnim.CLOSE_END_DEFAULT_MARK));
+    }
+
+    public static boolean teethOn(WormSpec s) { return s.p(24, 1) > 0; }
+
     /** @throws Moves.Rejected when the move cannot satisfy the curvature rule (and force is off) */
     public static Moves.Move build(WormSpec s) {
         Moves.Move m = build0(s);
@@ -78,7 +136,7 @@ public final class MoveFactory {
     /** Move for a spec, cached by everything except the time fields. */
     public static synchronized Moves.Move get(WormSpec s) {
         double[] q = s.p().clone();
-        for (int i : new int[]{8, 11, 12, 13, 16, 17}) if (i < q.length) q[i] = 0;
+        for (int i : new int[]{8, 11, 12, 13, 16, 17, 21, 22, 23, 24, 25}) if (i < q.length) q[i] = 0;   // time and mouth fields do not change the path
         String key = new WormSpec(s.kind(), s.mode(), q).serialize();
         Moves.Move m = CACHE.get(key);
         if (m == null) {

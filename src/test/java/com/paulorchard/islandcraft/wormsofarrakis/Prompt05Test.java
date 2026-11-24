@@ -202,7 +202,7 @@ class Prompt05Test {
             }
             double top = -1e9;
             for (double s = m.sCross1; s <= m.sCross2; s += 0.05) top = Math.max(top, m.tip(s)[1]);
-            assertEquals(H, top, 0.06 * w, "head tip apex, width " + w + " apex " + apex);
+            assertEquals(H, top, 0.1 * w, "head tip apex, width " + w + " apex " + apex);   // prompt 08: tolerance 0.06 w -> 0.1 w (the head is 0.4 R longer; W3 apex 1.0: tip 3.235 vs 3.0)
             assertEquals(H, m.apexY, 1e-6);
             assertEquals(4 * H / Math.tan(a), m.span(), 0.05, "range");
             assertEquals(-a, m.path.theta(m.sCross2), 1e-9, "landing heading");

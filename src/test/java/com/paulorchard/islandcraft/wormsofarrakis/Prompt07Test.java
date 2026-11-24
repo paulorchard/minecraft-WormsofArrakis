@@ -54,25 +54,29 @@ class Prompt07Test {
         }
     }
 
+    private static WormSpec anim(WormSpec s) { return MoveFactory.withMouth(s, MoveFactory.MOUTH_ANIM, 0.9, -999, 45, true); }
+
     @Test void theOldPositionalFormsGiveTheSameSpecsAsBefore() {
         // crest 16 60 0.5 12 (height, speed) and the defaults
-        assertEquals(MoveFactory.spec("crest", 16, 60, 0.5, 6, 12, 0, 0, 0, false, true, false, 1.0, 1.0, 1).serialize(), parse("crest", 16, 60, "0.5 12").spec().serialize());
-        assertEquals(MoveFactory.spec("crest", 16, 60, 0.4, 6, 12, 0, 0, 0, false, true, false, 1.0, 1.0, 1).serialize(), parse("crest", 16, 60, "").spec().serialize());
+        assertEquals(anim(MoveFactory.spec("crest", 16, 60, 0.5, 6, 12, 0, 0, 0, false, true, false, 1.0, 1.0, 1)).serialize(), parse("crest", 16, 60, "0.5 12").spec().serialize());
+        assertEquals(anim(MoveFactory.spec("crest", 16, 60, 0.4, 6, 12, 0, 0, 0, false, true, false, 1.0, 1.0, 1)).serialize(), parse("crest", 16, 60, "").spec().serialize());
         assertEquals(parse("crest", 16, 60, "0.5 12").spec().serialize(), parse("crest", 16, 60, "speed=12 height=0.5").spec().serialize());
         assertEquals(parse("crest", 16, 60, "height=0.5").spec().serialize(), parse("crest", 16, 60, "crest_fraction=0.5").spec().serialize());
-        assertEquals(MoveFactory.spec("crest", 16, 80, 1.3, 6, 6, 0, 3, 0, false, true, false, 1.0, 1.0, 1).serialize(), parse("crest", 16, 80, "height=1.3 radius=6 radius_down=3 speed=6").spec().serialize());
+        assertEquals(anim(MoveFactory.spec("crest", 16, 80, 1.3, 6, 6, 0, 3, 0, false, true, false, 1.0, 1.0, 1)).serialize(), parse("crest", 16, 80, "height=1.3 radius=6 radius_down=3 speed=6").spec().serialize());
         // emerge 16 60 10 60 (n, angle) and the longer form
-        String old = MoveFactory.spec("emerge", 16, 60, 10, 60, 12, 2, 0, 0, true, true, false, 1.0, 1.0, 1).serialize();
+        String old = anim(MoveFactory.spec("emerge", 16, 60, 10, 60, 12, 2, 0, 0, true, true, false, 1.0, 1.0, 1)).serialize();
+        String oldStatic = MoveFactory.spec("emerge", 16, 60, 10, 60, 12, 2, 0, 0, true, true, false, 1.0, 1.0, 1).serialize();   // prompt 08: the default mouth is now the animation (p8 = 2); open stays the static one
         assertEquals(old, parse("emerge", 16, 60, "10 60").spec().serialize());
-        assertEquals(old, parse("emerge", 16, 60, "10 60 12 2 open").spec().serialize());
+        assertEquals(oldStatic, parse("emerge", 16, 60, "10 60 12 2 open").spec().serialize());
         assertEquals(old, parse("emerge", 16, 60, "n=10 angle=60").spec().serialize());
-        assertEquals(MoveFactory.spec("emerge", 16, 60, 10, 90, 12, 2, 0, 0, true, true, false, 1.0, 1.0, 1).serialize(), parse("emerge", 16, 60, "").spec().serialize());
+        assertEquals(anim(MoveFactory.spec("emerge", 16, 60, 10, 90, 12, 2, 0, 0, true, true, false, 1.0, 1.0, 1)).serialize(), parse("emerge", 16, 60, "").spec().serialize());
         assertEquals(MoveFactory.spec("emerge", 16, 60, 6, 80, 20, 3, 0, 0, false, true, true, 1.0, 1.0, 1).serialize(), parse("emerge", 16, 60, "6 80 20 3 closed force").spec().serialize());
         // crash: the prompt 06 syntax
-        String c = MoveFactory.spec("fall", 16, 120, 2.5, 7, 12, 1.5, 12, 0, true, true, false, 1.0, 2.0, 1).serialize();
+        String cStatic = MoveFactory.spec("fall", 16, 120, 2.5, 7, 12, 1.5, 12, 0, true, true, false, 1.0, 2.0, 1).serialize();
+        String c = anim(MoveFactory.spec("fall", 16, 120, 2.5, 7, 12, 1.5, 12, 0, true, true, false, 1.0, 2.0, 1)).serialize();
         assertEquals(c, parse("crash", 16, 120, "").spec().serialize());
         assertEquals(c, parse("crash", 16, 120, "2.5").spec().serialize());
-        assertEquals(c, parse("crash", 16, 120, "height=2.5 lean=7 hold=1.5 speed=12 gravity=12 min_radius=2 mouth=open").spec().serialize());
+        assertEquals(cStatic, parse("crash", 16, 120, "height=2.5 lean=7 hold=1.5 speed=12 gravity=12 min_radius=2 mouth=open").spec().serialize());
         // and the moves they build are the old moves
         assertEquals(Moves.emerge(16, 60, 10, 60, 12, 2, 1.0, false).cycle, build("emerge", 16, 60, "10 60").cycle, 1e-9);
         assertEquals(Moves.crest(16, 60, 0.5, 6, 6, 12, false).cycle, build("crest", 16, 60, "0.5 12").cycle, 1e-9);

@@ -57,11 +57,17 @@ public final class MoveOptions {
         return num("speed", 12, 0.5, Moves.MAX_SPEED, true, "0.5..64", "head travel speed along the path in blocks per second");
     }
 
-    private static List<Key> tail(double pause, boolean open) {
+    private static List<Key> tail(double pause, String kind) {
+        double closeEndDefault = com.paulorchard.islandcraft.wormsofarrakis.path.MouthAnim.defaultCloseEnd(kind);
         return List.of(
                 num("pause", pause, 0, 600, true, "0..600", "seconds of rest between loops (everything under the sand)"),
                 new Key("loop", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "off plays once and removes the worm at the end"),
-                new Key("mouth", Type.MOUTH, open ? 1 : 0, 0, 1, false, open ? "open" : "closed", "open|closed", "static flap angle for now"));
+                new Key("mouth", Type.MOUTH, 2, 0, 2, false, "anim", "anim|open|closed", "anim = open at the start of every loop, closes once, then holds; open = static open_deg; closed = static 0"),
+                num("close_time", com.paulorchard.islandcraft.wormsofarrakis.path.MouthAnim.DEFAULT_CLOSE_TIME, 0.05, com.paulorchard.islandcraft.wormsofarrakis.path.MouthAnim.MAX_CLOSE_TIME, true, "0.05..30", "seconds the closing takes (shorter if the rise is shorter)"),
+                num("close_end", closeEndDefault, -com.paulorchard.islandcraft.wormsofarrakis.path.MouthAnim.MAX_CLOSE_END, com.paulorchard.islandcraft.wormsofarrakis.path.MouthAnim.MAX_CLOSE_END, true, "-30..30",
+                        kind.equals("crest") ? "seconds after the highest point of the head tip at which the closing ends" : "seconds after the start of the hold at which the closing ends"),
+                num("open_deg", HeadSpec.OPEN_DEGREES, 0, HeadSpec.OPEN_DEGREES, true, "0..45", "the start (open) angle in degrees"),
+                new Key("teeth", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the bristles on the mandibles and the throat"));
     }
 
     private static List<Key> join(List<Key> a, List<Key> b) {
@@ -75,7 +81,7 @@ public final class MoveOptions {
                 numText("height", Moves.DEFAULT_CREST_HEIGHT, t(Moves.DEFAULT_CREST_HEIGHT), "above 0 to " + t(Moves.MAX_CREST_HEIGHT) + ", force lifts the " + t(Moves.MAX_CREST_HEIGHT), "body widths of the highest plate above the sand (1.3 is the good reference)"),
                 numText("radius", 6, "6", "limit " + t(com.paulorchard.islandcraft.wormsofarrakis.geometry.BendLimit.MIN_BEND_RADIUS_WIDTHS) + " and up, force lifts the limit", "body widths, the way up"),
                 numText("radius_down", 0, "=radius", "limit " + t(com.paulorchard.islandcraft.wormsofarrakis.geometry.BendLimit.MIN_BEND_RADIUS_WIDTHS) + " and up, force lifts the limit", "body widths, the way down"),
-                speed()), tail(Moves.CREST_PAUSE, false)));
+                speed()), tail(Moves.CREST_PAUSE, "crest")));
         KEYS.put("emerge", join(List.of(
                 numText("n", Moves.DEFAULT_EMERGE_N, t(Moves.DEFAULT_EMERGE_N), "1..1000", "exposed body rings at the hold"),
                 numText("height", Double.NaN, "-", "above 0", "head tip height in body widths instead of n: (n + HEAD_LENGTH) x sin(angle) = height x width, n rounded; not together with n"),
@@ -83,7 +89,7 @@ public final class MoveOptions {
                 num("hold", Moves.DEFAULT_EMERGE_HOLD, 0, 120, true, "0..120", "seconds still at the top"),
                 speed(),
                 new Key("retreat_speed", Type.NUM, Double.NaN, 0.5, Moves.MAX_SPEED, true, "=speed", "0.5..64", "blocks per second of the way back"),
-                tail(Moves.EMERGE_PAUSE, true).get(0)), tail(Moves.EMERGE_PAUSE, true).subList(1, 3)));
+                tail(Moves.EMERGE_PAUSE, "emerge").get(0)), tail(Moves.EMERGE_PAUSE, "emerge").subList(1, 7)));
         KEYS.put("crash", join(List.of(
                 numText("height", Moves.DEFAULT_HEIGHT, t(Moves.DEFAULT_HEIGHT), t(Moves.MIN_FALL_HEIGHT) + ".." + t(Moves.MAX_FALL_HEIGHT) + ", force lifts", "body widths of the head tip at the hold"),
                 numText("lean", Moves.DEFAULT_LEAN, t(Moves.DEFAULT_LEAN), "0..45", "degrees off vertical (the rise is at 90 - lean)"),
@@ -91,14 +97,14 @@ public final class MoveOptions {
                 num("speed", 12, 0.5, Moves.MAX_SPEED, true, "0.5..64", "rise speed in blocks per second (the fall is gravity)"),
                 num("gravity", 12, 0.5, 80, true, "0.5..80", "blocks per second squared of the fall"),
                 numText("min_radius", 2, "2", "limit " + t(com.paulorchard.islandcraft.wormsofarrakis.geometry.BendLimit.MIN_BEND_RADIUS_WIDTHS) + " and up, force lifts the limit", "smallest bend radius of the fall pose, body widths")),
-                tail(Moves.CRASH_PAUSE, true)));
+                tail(Moves.CRASH_PAUSE, "crash")));
         KEYS.put("engulf", join(List.of(
                 numText("exposed", Moves.DEFAULT_EXPOSED, t(Moves.DEFAULT_EXPOSED), "1..3, force up to 6", "body rings above the sand at the hold (the head ring not counted)"),
                 numText("lean", Moves.DEFAULT_ENGULF_LEAN, t(Moves.DEFAULT_ENGULF_LEAN), "0..45", "degrees off vertical (the rise is at 90 - lean)"),
                 num("hold", Moves.ENGULF_HOLD, 0, 120, true, "0..120", "seconds still at the top"),
                 num("speed", 12, 0.5, Moves.MAX_SPEED, true, "0.5..64", "rise speed in blocks per second (the drop is gravity)"),
                 num("gravity", 12, 0.5, 80, true, "0.5..80", "blocks per second squared of the drop")),
-                tail(Moves.ENGULF_PAUSE, true)));
+                tail(Moves.ENGULF_PAUSE, "engulf")));
         BARE.put("crest", List.of("height", "speed"));
         BARE.put("emerge", List.of("n", "angle", "speed", "hold"));
         BARE.put("crash", List.of("height"));
@@ -191,13 +197,17 @@ public final class MoveOptions {
                     givenText.put(name, val);
                 }
                 case MOUTH -> {
-                    if (!val.equals("open") && !val.equals("closed")) throw new Bad("mouth must be open or closed, not " + val);
+                    if (!val.equals("open") && !val.equals("closed") && !val.equals("anim")) throw new Bad("mouth must be anim, open or closed, not " + val);
                     givenText.put(name, val);
                 }
             }
         }
         boolean loop = !"off".equals(givenText.get("loop"));
-        boolean mouthOpen = givenText.containsKey("mouth") ? givenText.get("mouth").equals("open") : find(keys, "mouth").dflt() != 0;
+        String mouthWord = givenText.getOrDefault("mouth", "anim");
+        int mouthMode = mouthWord.equals("open") ? MoveFactory.MOUTH_OPEN : mouthWord.equals("closed") ? MoveFactory.MOUTH_CLOSED : MoveFactory.MOUTH_ANIM;
+        boolean mouthOpen = mouthMode == MoveFactory.MOUTH_OPEN;
+        boolean teeth = !"off".equals(givenText.get("teeth"));
+        double closeEndArg = given.containsKey("close_end") ? given.get("close_end") : com.paulorchard.islandcraft.wormsofarrakis.path.MouthAnim.CLOSE_END_DEFAULT_MARK;
         Map<String, Double> v = new LinkedHashMap<>();
         for (Key k : keys) if (k.type() == Type.NUM) v.put(k.name(), given.containsKey(k.name()) ? given.get(k.name()) : k.dflt());
         Key pk = find(keys, "pause");
@@ -239,6 +249,7 @@ public final class MoveOptions {
             }
             default -> throw new Bad("unknown move " + move);
         }
+        spec = MoveFactory.withMouth(spec, mouthMode, v.get("close_time"), closeEndArg, v.get("open_deg"), teeth);
         return new Parsed(spec, force, mouthOpen, loop, notes, v);
     }
 }

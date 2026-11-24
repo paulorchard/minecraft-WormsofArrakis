@@ -99,7 +99,7 @@ class PathTest {
             System.out.printf("[path] crest apex: %4.0f %4.1f %3.0f -> %.3f %.3f entry=%.1f exit=%.1f span=%.1f exposedLength=%.1f%n", w, h, radius, pathTop, measured, m.entryAngle, m.exitAngle, m.span(), m.exposedLength);
             double maxTip = 0;
             for (double s = m.s0; s <= m.sEnd; s += 0.5) maxTip = Math.max(maxTip, tipToPath(m, s));
-            assertTrue(maxTip <= 0.05 * w + 0.1, "head tip is on the path within " + (0.05 * w + 0.1) + ", measured " + maxTip + " (width " + w + " height " + h + " radius " + radius + ")");
+            assertTrue(maxTip <= 0.05 * w + 0.1 + 0.1 * HeadSpec.ringRadius(w), "head tip is on the path within " + (0.05 * w + 0.1 + 0.1 * HeadSpec.ringRadius(w)) + ", measured " + maxTip + " (width " + w + " height " + h + " radius " + radius + ")");
         }
         assertThrows(Moves.Rejected.class, () -> Moves.crest(16, 60, 3.2, 6, 6, 12, false));
         assertThrows(Moves.Rejected.class, () -> Moves.crest(16, 60, 0, 6, 6, 12, false));

@@ -9,6 +9,8 @@ import com.mojang.math.Axis;
 import com.paulorchard.islandcraft.wormsofarrakis.WormsOfArrakis;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.ChainMath;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.Frustum;
+import com.paulorchard.islandcraft.wormsofarrakis.geometry.HeadMouth;
+import com.paulorchard.islandcraft.wormsofarrakis.path.MouthAnim;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.ScaleMath;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.ShingleMath;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.WormMath;
@@ -142,10 +144,11 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
         double s = at[0];
         Integer pid = state.getGeckolibData(ID);
         Moves.Move.PhaseAt phase = m.phaseAt(tau);
-        if (!phase.name().equals(PHASE_LAST.put(pid, phase.name()))) {   // the mouth rework attaches to these changes
+        double mouthDeg = MoveFactory.mouthAngle(spec, tau);
+        if (!phase.name().equals(PHASE_LAST.put(pid, phase.name()))) {
             if (PHASE_LAST.size() > 64) { PHASE_LAST.clear(); PHASE_LAST.put(pid, phase.name()); }
-            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} phase {} t={}s (phase length {}s, script time {}s)", m.label(), phase.name(),
-                    String.format("%.2f", phase.t()), String.format("%.2f", phase.duration()), String.format("%.2f", tau));
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} phase {} t={}s (phase length {}s, script time {}s) mouth={}deg", m.label(), phase.name(),
+                    String.format("%.2f", phase.t()), String.format("%.2f", phase.duration()), String.format("%.2f", tau), String.format("%.1f", mouthDeg));
         }
         int n = WormMath.faceCount(m.width);
         double linerMode = spec.p(16, 1);
@@ -161,7 +164,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
             WormPose pose = m.pose(s);
             ShingleMath.Options opt = visual(ShingleMath.Options.defaults(ScaleMath.LIP_LENGTH, linerMode > 0), id)
                     .withLinerColor(linerMode >= 1.5 ? ShingleMath.LINER_DARK : ShingleMath.LINER_TINT);
-            c.skin = WormSkin.build(pose, n, m.r0, surfaceFor(state), opt, spec.p(8, 0) > 0 ? HeadSpec.OPEN_DEGREES : 0.0);
+            c.skin = WormSkin.build(pose, n, m.r0, surfaceFor(state), opt, 0.0);
             c.exposed = pose.exposedBody(0);
             c.heights = m.headHeights(s);
             if (MOVE_CACHE.size() > 64) MOVE_CACHE.clear();
@@ -209,7 +212,96 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
                 ShingleStats.submitted(System.nanoTime() - s0);
             });
         }
+        if (c.skin.hasHead()) submitMouth(spec, id, n, m, c.skin, id, mouthDeg, tau, poseStack, collector, light);
         poseStack.popPose();
+    }
+
+    // ---- prompt 08: the mouth (mandible shells, fixed throat, teeth), built in the head's local frame and cached per angle ----
+
+    /** The flat vanilla texture of the throat (tinted by vertex colour; no PNG is shipped), and the teeth's two choices. */
+    static final Identifier FLAT_TEXTURE = Identifier.parse("minecraft:textures/block/white_concrete.png");
+    static final Identifier BONE_TEXTURE = Identifier.parse("minecraft:textures/block/bone_block_side.png");
+
+    private static final class MouthCache {
+        String key;
+        int angleKey = -1;
+        HeadMouth.Mesh mand, thr;
+        int builds;          // rebuilds of the mandibles since the mouth last opened
+        boolean closedLogged;
+    }
+
+    private static final Map<Integer, MouthCache> MOUTH_CACHE = new HashMap<>();
+    private static String LAST_MOUTH_LOG = "";
+
+    private void submitMouth(WormSpec spec, Integer pid, int n, Moves.Move m, WormSkin skin, Integer id, double mouthDeg, double tau,
+                             PoseStack poseStack, SubmitNodeCollector collector, int light) {
+        ShingleMath.Options opt = visual(ShingleMath.Options.defaults(ScaleMath.LIP_LENGTH, true), id);
+        double R = m.r0;
+        double delta0 = WormSkin.headDelta(opt, n);
+        boolean teeth = MoveFactory.teethOn(spec);
+        MouthCache mc = MOUTH_CACHE.get(pid);
+        String key = n + "|" + R + "|" + m.width + "|" + delta0 + "|" + teeth + "|" + opt.jitter() + "|" + opt.seed() + "|" + HeadMouth.BONE_TEETH;
+        if (mc == null || !key.equals(mc.key)) {
+            if (MOUTH_CACHE.size() > 64) MOUTH_CACHE.clear();
+            mc = new MouthCache();
+            mc.key = key;
+            mc.thr = HeadMouth.throat(m.width, n, R, delta0, teeth);   // fixed: built once
+            MOUTH_CACHE.put(pid, mc);
+        }
+        int ak = MouthAnim.angleKey(mouthDeg);
+        if (ak != mc.angleKey) {   // the cache key includes the mouth angle; once it is 0 (closed) it never changes again
+            if (mouthDeg > 0 && mc.angleKey == 0) { mc.builds = 0; mc.closedLogged = false; }   // a new loop: the mouth is open again
+            mc.mand = HeadMouth.mandibles(m.width, n, R, delta0, HeadSpec.coneHeight(m.width), ak / 10.0, opt, teeth);
+            mc.angleKey = ak;
+            mc.builds++;
+            String sig = key + "|" + ak;
+            if (ak == 0 || !LAST_MOUTH_LOG.startsWith(key)) {
+                LAST_MOUTH_LOG = sig;
+                WormsOfArrakis.LOGGER.info("[WormsOfArrakis] mouth build: width={} n={} R={} angle={}deg thickness={} blocks shell quads={} mandible teeth={} ({} quads, {} ms) throat quads={} throat teeth={} ({} quads, {} ms) teeth={}",
+                        m.width, n, String.format("%.3f", R), String.format("%.1f", ak / 10.0), String.format("%.3f", mc.mand.thickness), mc.mand.shell.quads, mc.mand.mandibleTeeth,
+                        mc.mand.toothQuads, String.format("%.2f", mc.mand.buildMs), mc.thr.flat.quads, mc.thr.throatTeeth, mc.thr.toothQuads, String.format("%.2f", mc.thr.buildMs), teeth ? "on" : "off");
+            }
+        }
+        if (ak == 0 && !mc.closedLogged && (int) spec.p(8, 0) == MoveFactory.MOUTH_ANIM && spec.p(25, -1) < 0) {
+            mc.closedLogged = true;
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] mouth closed t={}s (script time; {} mandible rebuilds since it opened, none from here until the loop restarts)", String.format("%.2f", tau % m.cycle), mc.builds);
+        }
+        var chain = skin.chain;
+        double[][] F = chain.frame[0];
+        double[] C = chain.center[0];
+        final Matrix4f l2w = new Matrix4f((float) F[0][0], (float) F[1][0], (float) F[2][0], 0f, (float) F[0][1], (float) F[1][1], (float) F[2][1], 0f,
+                (float) F[0][2], (float) F[1][2], (float) F[2][2], 0f, (float) C[0], (float) C[1], (float) C[2], 1f);
+        final Matrix3f l2n = new Matrix3f((float) F[0][0], (float) F[1][0], (float) F[2][0], (float) F[0][1], (float) F[1][1], (float) F[2][1], (float) F[0][2], (float) F[1][2], (float) F[2][2]);
+        final HeadMouth.Mesh mand = mc.mand, thr = mc.thr;
+        // the shells keep back-face culling: the outer skin, the inner skin and the walls are separate faces wound for their own side
+        collector.submitCustomGeometry(poseStack, RenderTypes.entityCutoutCull(TestWormModel.TEXTURE), (pose, buffer) -> emit(mand.shell, pose, l2w, l2n, buffer, light));
+        // the throat and the bristles are single triangles seen from both sides: RenderTypes.entityCutout(texture) is the pipeline with withCull(false)
+        collector.submitCustomGeometry(poseStack, RenderTypes.entityCutout(FLAT_TEXTURE), (pose, buffer) -> emit(thr.flat, pose, l2w, l2n, buffer, light));
+        if (teeth) {
+            Identifier tt = HeadMouth.BONE_TEETH ? BONE_TEXTURE : FLAT_TEXTURE;
+            collector.submitCustomGeometry(poseStack, RenderTypes.entityCutout(tt), (pose, buffer) -> {
+                emit(mand.bristles, pose, l2w, l2n, buffer, light);
+                emit(thr.bristles, pose, l2w, l2n, buffer, light);
+            });
+        }
+    }
+
+    private static void emit(ShingleMath.Result res, PoseStack.Pose pose, Matrix4f l2w, Matrix3f l2n, com.mojang.blaze3d.vertex.VertexConsumer buffer, int light) {
+        if (res.quads == 0) return;
+        Matrix4f mm = new Matrix4f(pose.pose()).mul(l2w);
+        Matrix3f nm = new Matrix3f(pose.normal()).mul(l2n);
+        Vector3f out = new Vector3f(), p = new Vector3f();
+        float[] v = res.v;
+        for (int q = 0; q < res.quads; q++) {
+            int b = q * 32;
+            int color = res.color[q];
+            nm.transform(v[b + 5], v[b + 6], v[b + 7], out);
+            for (int k = 0; k < 4; k++) {
+                int atv = b + k * 8;
+                mm.transformPosition(v[atv], v[atv + 1], v[atv + 2], p);
+                buffer.addVertex(p.x, p.y, p.z, color, v[atv + 3], v[atv + 4], net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY, light, out.x, out.y, out.z);
+            }
+        }
     }
 
 
