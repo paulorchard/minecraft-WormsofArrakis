@@ -1,6 +1,6 @@
 # Report — Prompt 10 Worms of Arrakis: eruption effects, crest fx and black faces
 
-Status: partly — all three parts built (the crest redone to the revised Part 2 with the tail), 193 unit tests pass (0 failures) and two dedicated-server smoke starts ran clean; nothing was seen in a client (hard rule), so the look of the eruption, the crest effects and the tail, and whether the light fix cures the black faces, are unverified.   Commit / tag: `fx-4` on 6fd0c61 (eruption), `light-1` on d217acd (black faces), `fx-5` and `tail-1` on the crest commit (see `git log`; `fx-5` was moved there from 6fd0c61, the first crest design, which the revised Part 2 replaced)
+Status: partly — all three parts built (the crest redone to the revised Part 2 with the tail), 193 unit tests pass (0 failures) and two dedicated-server smoke starts ran clean; nothing was seen in a client (hard rule), so the look of the eruption, the crest effects and the tail, and whether the light fix cures the black faces, are unverified.   Commit / tag: `fx-4` on 6fd0c61 (eruption), `light-1` on d217acd (black faces), `fx-5` and `tail-1` on 9fdbd45 (the revised crest; `fx-5` was moved there from 6fd0c61, the first crest design, which the revised Part 2 replaced)
 
 ## What was built
 
