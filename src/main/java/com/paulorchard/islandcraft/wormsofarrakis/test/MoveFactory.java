@@ -96,13 +96,14 @@ public final class MoveFactory {
     }
 
     /**
-     * Prompt 09: the effect keys on top of a spec: p26 fx (1/0), p27 fxsound, p28 fxparticles, p29 fxvol, p30 fxcount. A spec whose fx keys are all
-     * at the defaults of its move (fx on for crash, emerge, engulf, off for crest) keeps its shorter older length.
+     * Prompt 09: the effect keys on top of a spec: p26 fx (1/0), p27 fxsound, p28 fxparticles, p29 fxvol, p30 fxcount, p31 eruption (prompt 10). A spec whose fx keys are all
+     * at the defaults of its move (fx on for crest, crash, emerge, engulf; eruption on) keeps its shorter older length.
      */
     public static WormSpec withFx(WormSpec base, FxOptions o) {
         if (o.isDefault(FxOptions.defaultOn(base.mode()))) return base;
-        double[] p = java.util.Arrays.copyOf(base.p(), Math.max(31, base.p().length));
+        double[] p = java.util.Arrays.copyOf(base.p(), Math.max(32, base.p().length));
         fillMouthDefaults(base, p);
+        p[31] = o.eruption() ? 1 : 0;
         p[26] = o.on() ? 1 : 0;
         p[27] = o.sound() ? 1 : 0;
         p[28] = o.particles() ? 1 : 0;
@@ -113,7 +114,7 @@ public final class MoveFactory {
 
     /** The effect options of a spec (defaults when the spec is short). */
     public static FxOptions fxOptions(WormSpec s) {
-        return new FxOptions(s.p(26, FxOptions.defaultOn(s.mode()) ? 1 : 0) > 0, s.p(27, 1) > 0, s.p(28, 1) > 0, s.p(29, 1), s.p(30, 1));
+        return new FxOptions(s.p(26, FxOptions.defaultOn(s.mode()) ? 1 : 0) > 0, s.p(27, 1) > 0, s.p(28, 1) > 0, s.p(29, 1), s.p(30, 1), s.p(31, 1) > 0);
     }
 
     /** The mouth closing numbers of a spec (for the anchors): close_time and close_end. */

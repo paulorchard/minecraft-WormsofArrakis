@@ -90,16 +90,15 @@ class Prompt09Test {
     }
 
     @Test
-    void crestHasOnlyBreachAndReentry() {
+    void crestHasItsOwnAnchorsSincePrompt10() {
+        // UPDATED in prompt 10 (was crestHasOnlyBreachAndReentry): the crest now has riseEnd (the end of the mouth closing) and fallStart (= the apex)
         FxAnchors.Anchors a = anchors(spec("crest", 16, 80, "height=1.3"));
         assertFalse(Double.isNaN(a.breach()));
         assertFalse(Double.isNaN(a.reentry()));
         assertTrue(a.breach() < a.reentry());
-        assertTrue(Double.isNaN(a.riseEnd()));
-        assertTrue(Double.isNaN(a.fallStart()));
-        // the rows that need riseEnd or fallStart play nothing on a crest
+        assertFalse(Double.isNaN(a.riseEnd()));
+        assertEquals(a.apex(), a.fallStart(), 1e-9);
         List<FxPlayer.Play> plays = FxPlayer.expand(a, FxOptions.defaults(true), 1);
-        for (FxPlayer.Play p : plays) assertNotEquals(Anchor.RISE_END, CrashFx.CUES.get(p.cue()).anchor());
         assertTrue(plays.size() > 0);
     }
 
@@ -204,9 +203,9 @@ class Prompt09Test {
 
     @Test
     void noCueForAMoveWithFxOffAndTheDefaultsOfTheMoves() {
-        assertFalse(MoveFactory.fxOptions(spec("crest", 16, 80, "")).on(), "crest default off");
-        assertTrue(MoveFactory.fxOptions(spec("crest", 16, 80, "fx=on")).on());
-        for (String m : new String[]{"crash", "emerge", "engulf"}) assertTrue(MoveFactory.fxOptions(spec(m, 16, 60, "")).on(), m + " default on");
+        assertTrue(MoveFactory.fxOptions(spec("crest", 16, 80, "")).on(), "crest default ON since prompt 10 (was off)");
+        assertFalse(MoveFactory.fxOptions(spec("crest", 16, 80, "fx=off")).on());
+        for (String m : new String[]{"crash", "emerge", "engulf", "crest"}) assertTrue(MoveFactory.fxOptions(spec(m, 16, 60, "")).on(), m + " default on");
         WormSpec off = spec("crash", 16, 120, "fx=off");
         assertFalse(MoveFactory.fxOptions(off).on());
         assertTrue(FxPlayer.expand(anchors(off), MoveFactory.fxOptions(off), 1).isEmpty());
@@ -223,12 +222,11 @@ class Prompt09Test {
         for (String bad : new String[]{"fx=maybe", "fxsound=1", "fxparticles=yes", "fxvol=loud", "fxcount=many"})
             assertThrows(MoveOptions.Bad.class, () -> MoveOptions.parse("crash", 16, 120, bad, false), bad);
         MoveOptions.Parsed c = MoveOptions.parse("crest", 16, 80, "fx=on", false);
-        assertEquals(1, c.notes().size());
-        assertTrue(c.notes().get(0).contains("approach, breach and reentry"));
+        assertEquals(0, c.notes().size(), "prompt 10: no partial-sheet note on a crest any more");
         // the fx keys are in the generated moves text of the four moves and nowhere else
         for (String line : MoveOptions.lines())
             for (String k : new String[]{"fx=", "fxsound=", "fxparticles=", "fxvol=", "fxcount="}) assertTrue(line.contains(k), line);
-        assertTrue(MoveOptions.line("crest").contains("fx=off"));
+        assertTrue(MoveOptions.line("crest").contains("fx=on"), "prompt 10: the crest default is on");
         assertTrue(MoveOptions.line("crash").contains("fx=on"));
     }
 

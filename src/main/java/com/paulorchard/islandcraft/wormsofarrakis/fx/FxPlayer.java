@@ -30,12 +30,22 @@ public final class FxPlayer {
     private final List<Play> schedule;
     private final Random rng;
     private final double scale;
-    private final double[] acc = new double[CrashFx.EMITTERS.size()];
+    /** One stream of particles: a row of the sheet at one site. site 0 = the entry crossing (the only one of crash, emerge, engulf), 1 = the exit crossing (crest). */
+    public record Lane(int row, boolean eruption, int site, double start, double end, boolean instant, double perSecond, int count, double half) {}
+
+    private final List<Lane> lanes = new ArrayList<>();
+    private final double[] acc;
+    private final long seed;
+    private final Random rngE;
+    private long jetEpoch = Long.MIN_VALUE;
+    private Jets jets;
+    private double lastEntryZ = Double.NaN, lastExitZ = Double.NaN;
 
     private boolean cancelled;
     private boolean soundOn = true, particlesOn = true;
     private CrashFx.Group solo;
-    private double lastTau = Double.NaN, lastT = -1, lastCrossZ = Double.NaN;
+    private double lastTau = Double.NaN, lastT = -1;
+    private int budget = CrashFx.BUDGET;
     private long lastLoop;
     private int next;
     private long tickNo;
@@ -45,7 +55,7 @@ public final class FxPlayer {
     // statistics
     private long spawned, thinned, cappedTicks, soundsPlayed;
     private int peakAlive;
-    private final long[] spawnedByRow = new long[CrashFx.EMITTERS.size()];
+    private final long[] spawnedByRow = new long[CrashFx.EMITTERS.size() + EruptionFx.ROWS.size()];
     private boolean capLogged;
 
     public FxPlayer(Moves.Move m, FxOptions opt, double closeTime, double closeEnd, long seed) {
@@ -55,7 +65,71 @@ public final class FxPlayer {
         this.schedule = expand(a, opt, seed);
         this.rng = new Random(seed * 7919L + 17);
         this.scale = opt.countScale(m.r0);
+        this.seed = seed;
+        this.rngE = new Random(seed * 104729L + 31);
+        buildLanes();
+        this.acc = new double[lanes.size()];
     }
+
+    /** The streams of this move: the rows of prompt 09 (adapted for a crest), then the eruption rows. */
+    private void buildLanes() {
+        boolean crest = a.crest();
+        for (int i = 0; i < CrashFx.EMITTERS.size(); i++) {
+            Emitter e = CrashFx.EMITTERS.get(i);
+            double start = a.at(e.from()) + e.off();
+            Anchor until = e.until();
+            int site = 0;
+            if (crest) {   // prompt 10 part 2: the crest has no hold; its fall is the dive into the exit hole
+                if (e.from() == Anchor.RISE_END && e.until() == Anchor.FALL_START) continue;
+                if (e.from() == Anchor.FALL_START) {
+                    start = a.reentry() + e.off();
+                    until = Anchor.END;
+                    site = 1;
+                } else if (e.until() == Anchor.RISE_END) until = Anchor.APEX;
+                else if (e.from() == Anchor.REENTRY) site = 1;
+                else if (CrashFx.isBaseMask(e)) addLane(i, false, 1, a.reentry() + e.off(), a.end(), e.rate(), 0, 0);
+            }
+            if (Double.isNaN(start)) continue;
+            if (e.isBurst()) addLane(i, false, site, start, Double.NaN, 0, e.burst(), 0);
+            else addLane(i, false, site, start, a.at(until), e.rate(), 0, 0);
+        }
+        if (!opt.eruption() || Double.isNaN(a.breach())) return;
+        for (int j = 0; j < EruptionFx.ROWS.size(); j++) {
+            EruptionFx.Row r = EruptionFx.ROWS.get(j);
+            double start = a.breach() + r.start();
+            int row = CrashFx.EMITTERS.size() + j;
+            if (r.isBurst()) addLane(row, true, 0, start, start + r.over(), r.amount() / r.over(), (int) r.amount(), start + r.over() / 2);
+            else addLane(row, true, 0, start, a.breach() + EruptionFx.ERUPTION_SUSTAIN, r.amount(), 0, 0);
+        }
+    }
+
+    private void addLane(int row, boolean eruption, int site, double start, double end, double perSecond, int count, double half) {
+        boolean instant = !eruption && Double.isNaN(end) && count > 0;
+        if (!instant && (Double.isNaN(end) || end <= start)) return;
+        lanes.add(new Lane(row, eruption, site, start, end, instant, perSecond, count, half));
+    }
+
+    /** The streams of this player (for tests and the report). */
+    public List<Lane> lanes() { return lanes; }
+
+    /** The 14 jets of one 0.6 s epoch; deterministic from the seed and the epoch. */
+    public record Jets(double[] angle, double[] strength) {}
+
+    public static Jets jetsFor(long seed, long epoch) {
+        Random r = new Random(seed * 1299709L + epoch * 15485863L + 7);
+        double[] ang = new double[EruptionFx.ERUPTION_JETS], str = new double[EruptionFx.ERUPTION_JETS];
+        for (int i = 0; i < ang.length; i++) {
+            ang[i] = r.nextDouble() * 2 * Math.PI;
+            str[i] = EruptionFx.JET_STRENGTH_MIN + r.nextDouble() * (EruptionFx.JET_STRENGTH_MAX - EruptionFx.JET_STRENGTH_MIN);
+        }
+        return new Jets(ang, str);
+    }
+
+    /** Index of the jets epoch at loop time t: the jets are re-rolled every {@link EruptionFx#JET_REROLL} seconds from the breach. */
+    public static long jetEpoch(double t, double breach) { return (long) Math.floor((t - breach) / EruptionFx.JET_REROLL); }
+
+    /** The jets in use at the last tick (null before the first eruption tick). */
+    public Jets currentJets() { return jets; }
 
     public FxAnchors.Anchors anchors() { return a; }
     public List<Play> schedule() { return schedule; }
@@ -67,6 +141,9 @@ public final class FxPlayer {
     public long soundsPlayed() { return soundsPlayed; }
     public int peakAlive() { return peakAlive; }
     public boolean cancelled() { return cancelled; }
+
+    /** The budget of live particles the sheet keeps under (default {@link CrashFx#BUDGET}); a test or a tuning can change it. */
+    public void setBudget(int live) { this.budget = live; }
 
     /** Runtime switches (the fx command): sound on/off, particles on/off, and the one sound group that plays (null = all). */
     public void setRuntime(boolean sound, boolean particles, CrashFx.Group solo) {
@@ -87,7 +164,8 @@ public final class FxPlayer {
         if (!opt.on() || !opt.sound() || opt.vol() <= 0) return l;
         for (int c = 0; c < CrashFx.CUES.size(); c++) {
             Cue cue = CrashFx.CUES.get(c);
-            double base = a.at(cue.anchor());
+            if (a.crest() && cue.group() == CrashFx.Group.SLIDE) continue;   // the crest has no hold
+            double base = a.at(effAnchor(a, cue));
             if (Double.isNaN(base)) continue;
             for (int i = 0; i < cue.rep(); i++) {
                 Random r = new Random(seed * 1000003L + c * 131L + i);
@@ -98,6 +176,9 @@ public final class FxPlayer {
         l.sort((p, q) -> Double.compare(p.time(), q.time()));
         return l;
     }
+
+    /** The anchor a cue is really fixed to: on a crest the fall (rushing sand) starts at the reentry, the dive into the exit hole. */
+    public static Anchor effAnchor(FxAnchors.Anchors a, Cue c) { return a.crest() && c.anchor() == Anchor.FALL_START ? Anchor.REENTRY : c.anchor(); }
 
     /** Number of plays after loop time t (what a cancel at t drops). */
     public static int countAfter(List<Play> plays, double t) {
@@ -133,13 +214,13 @@ public final class FxPlayer {
             java.util.Arrays.fill(acc, 0);
             if (restart) {
                 lastT = -1;
-                lastCrossZ = Double.NaN;
+                lastEntryZ = lastExitZ = Double.NaN;
                 next = 0;
             } else {
                 lastT = t;
                 next = 0;
                 while (next < schedule.size() && schedule.get(next).time() <= t) next++;
-                lastCrossZ = Double.NaN;
+                lastEntryZ = lastExitZ = Double.NaN;
             }
         }
         double a0 = lastT, b0 = t;
@@ -150,44 +231,49 @@ public final class FxPlayer {
             Play p = schedule.get(next++);
             Cue cue = CrashFx.CUES.get(p.cue());
             if (!soundOn || (solo != null && solo != cue.group())) continue;
-            double z = cue.anchor() == Anchor.REENTRY ? a.reentryZ() : a.holeZ();
+            double z = effAnchor(a, cue) == Anchor.REENTRY ? a.reentryZ() : a.holeZ();
             soundsPlayed++;
             sink.sound(cue, 0, 0, z, p.volume(), p.pitch());
         }
 
         if (!opt.on() || !opt.particles() || !particlesOn || scale <= 0) return;
-        int E = CrashFx.EMITTERS.size();
+        FxGeometry.Snapshot g = FxGeometry.at(m, t);
+        if (!Double.isNaN(g.entryZ)) lastEntryZ = g.entryZ;
+        if (!Double.isNaN(g.exitZ)) lastExitZ = g.exitZ;
+        boolean[] live = {!Double.isNaN(g.entryZ), !Double.isNaN(g.exitZ)};
+        int E = lanes.size();
         int[] want = new int[E];
-        int total = 0;
+        boolean[] exempt = new boolean[E];
+        int total = 0, exemptTotal = 0;
         for (int i = 0; i < E; i++) {
-            Emitter e = CrashFx.EMITTERS.get(i);
-            double start = a.at(e.from()) + e.off();
-            if (Double.isNaN(start)) continue;
-            if (e.isBurst()) {
-                if (start > a0 && start <= b0) want[i] = (int) Math.floor(e.burst() * scale + rng.nextDouble());
+            Lane ln = lanes.get(i);
+            if (ln.instant()) {
+                if (ln.start() > a0 && ln.start() <= b0) want[i] = (int) Math.floor(ln.count() * scale + rng.nextDouble());
             } else {
-                double end = a.at(e.until());
-                if (Double.isNaN(end)) continue;
-                double ov = Math.min(b0, end) - Math.max(a0, start);
+                double ov = Math.min(b0, ln.end()) - Math.max(a0, ln.start());
                 if (ov > 0) {
-                    acc[i] += e.rate() * scale * ov;
+                    acc[i] += ln.perSecond() * scale * ov;
                     int n = (int) Math.floor(acc[i]);
                     acc[i] -= n;
-                    want[i] = n;
+                    want[i] = a.crest() && !live[ln.site()] ? 0 : n;   // a crest: a crossing emits only while some part of the body still passes through it
                 }
+                // the first half of an eruption burst is the part that reads as an explosion: the budget never thins it
+                if (ln.eruption() && ln.count() > 0 && (a0 + b0) / 2 <= ln.half()) exempt[i] = true;
             }
             total += want[i];
+            if (exempt[i]) exemptTotal += want[i];
         }
         if (total == 0) return;
 
         int alive = Math.max(aliveEst, externalLive);
-        int room = CrashFx.BUDGET - alive;
+        int room = budget - alive;
         if (total > room) {
-            double ratio = Math.max(0, room) / (double) total;
+            int thinnable = total - exemptTotal;
+            double ratio = thinnable <= 0 ? 1 : Math.max(0, room - exemptTotal) / (double) thinnable;
             int before = total;
             total = 0;
             for (int i = 0; i < E; i++) {
-                if (want[i] > 0) want[i] = Math.max(1, (int) Math.round(want[i] * ratio));   // every row keeps at least one: thinned evenly, never dropped
+                if (want[i] > 0 && !exempt[i]) want[i] = Math.max(1, (int) Math.round(want[i] * ratio));   // every row keeps at least one: thinned evenly, never dropped
                 total += want[i];
             }
             thinned += before - total;
@@ -199,33 +285,78 @@ public final class FxPlayer {
             }
         }
 
-        FxGeometry.Snapshot g = FxGeometry.at(m, t);
-        if (!Double.isNaN(g.crossZ)) lastCrossZ = g.crossZ;
-        double crossZ = Double.isNaN(g.crossZ) ? lastCrossZ : g.crossZ;
+        double[] siteZ = {Double.isNaN(g.entryZ) ? lastEntryZ : g.entryZ, Double.isNaN(g.exitZ) ? lastExitZ : g.exitZ};
         double R = m.r0;
+        long ep = jetEpoch(t, a.breach());
+        if (jets == null || ep != jetEpoch) {
+            jets = jetsFor(seed, ep);
+            jetEpoch = ep;
+        }
         List<Integer> bodyRings = null;
         for (int i = 0; i < E; i++) {
-            Emitter e = CrashFx.EMITTERS.get(i);
+            Lane ln = lanes.get(i);
+            int row = ln.row();
             for (int k = 0; k < want[i]; k++) {
                 FxSink.Spawn s;
-                switch (e.place()) {
-                    case CROSSING -> s = crossing(e, i, crossZ, R);
-                    case OVERHEAD -> s = overhead(e, i, g, R);
-                    case MOUTH -> s = mouth(e, i, g, R);
-                    default -> {
-                        if (bodyRings == null) bodyRings = FxGeometry.bodyRings(g);
-                        s = body(e, i, g, bodyRings, R);
+                if (ln.eruption()) s = erupt(EruptionFx.ROWS.get(row - CrashFx.EMITTERS.size()), row, siteZ[ln.site()], R);
+                else {
+                    Emitter e = CrashFx.EMITTERS.get(row);
+                    switch (e.place()) {
+                        case CROSSING -> s = crossing(e, row, siteZ[ln.site()], R);
+                        case OVERHEAD -> s = overhead(e, row, g, R);
+                        case MOUTH -> s = mouth(e, row, g, R);
+                        default -> {
+                            if (bodyRings == null) bodyRings = FxGeometry.bodyRings(g);
+                            s = body(e, row, g, bodyRings, R);
+                        }
                     }
                 }
                 if (s == null) continue;
                 spawned++;
-                spawnedByRow[i]++;
+                spawnedByRow[row]++;
                 aliveEst++;
                 dying[(int) ((tickNo + s.life()) & 255)]++;
                 sink.particle(s);
             }
         }
         peakAlive = Math.max(peakAlive, aliveEst);
+    }
+
+    private double ur(double lo, double hi) { return lo + rngE.nextDouble() * (hi - lo); }
+
+    /**
+     * One particle of an eruption row (prompt 10). ring/jets/curtain: radius (ring + uniform(-radJit, radJit)) x r0 round the crossing, disc: sqrt(uniform)
+     * x ring x r0; the height is 0.05 + uniform(0, yJit) (curtain 0.5 + ...). Velocity: the outward unit vector x out + up x uniform(0.75, 1.25) + a gaussian
+     * x spread on each axis (the vertical x 0.5); on jets out and up are multiplied by the strength of the jet the particle picked (its angle is the jet's
+     * angle plus a gaussian of 0.12 rad).
+     */
+    private FxSink.Spawn erupt(EruptionFx.Row r, int row, double z0, double R) {
+        if (Double.isNaN(z0)) return null;   // no crossing yet
+        double th, str = 1, rad;
+        switch (r.shape()) {
+            case JETS -> {
+                int j = rngE.nextInt(EruptionFx.ERUPTION_JETS);
+                th = jets.angle()[j] + rngE.nextGaussian() * EruptionFx.JET_ANGLE_SIGMA;
+                str = jets.strength()[j];
+                rad = (r.ring() + ur(-r.radJit(), r.radJit())) * R;
+            }
+            case DISC -> {
+                th = rngE.nextDouble() * 2 * Math.PI;
+                rad = Math.sqrt(rngE.nextDouble()) * r.ring() * R;
+            }
+            default -> {
+                th = rngE.nextDouble() * 2 * Math.PI;
+                rad = (r.ring() + ur(-r.radJit(), r.radJit())) * R;
+            }
+        }
+        double ux = Math.cos(th), uz = Math.sin(th);
+        double y = (r.shape() == EruptionFx.Shape.CURTAIN ? 0.5 : BASE_PUSH) + rngE.nextDouble() * r.yJit();
+        double vx = ux * r.out() * str + rngE.nextGaussian() * r.spread();
+        double vy = r.up() * ur(0.75, 1.25) * str + rngE.nextGaussian() * r.spread() * 0.5;
+        double vz = uz * r.out() * str + rngE.nextGaussian() * r.spread();
+        int life = r.lifeMin() + (r.lifeMax() > r.lifeMin() ? rngE.nextInt(r.lifeMax() - r.lifeMin() + 1) : 0);
+        double shade = ur(EruptionFx.SHADE_MIN, EruptionFx.SHADE_MAX);
+        return new FxSink.Spawn(r.type(), ux * rad, y, z0 + uz * rad, vx, vy, vz, life, r.size(), r.grav(), r.tint(), row, r.endScale(), r.alpha(), shade, r.drag(), true);
     }
 
     private double gauss(double spread) { return rng.nextGaussian() * spread; }
@@ -313,6 +444,27 @@ public final class FxPlayer {
         return l;
     }
 
+    /** Prompt 10: one chat line per eruption row (times of this move), and a first line with the constants. */
+    public static List<String> eruptionChatLines(FxAnchors.Anchors an) {
+        List<String> l = new ArrayList<>();
+        l.add(String.format(Locale.ROOT, "eruption: %d rows from the breach (%.2fs), sustain until +%.1fs, %d jets re-rolled every %.1fs", EruptionFx.ROWS.size(), an.breach(), EruptionFx.ERUPTION_SUSTAIN,
+                EruptionFx.ERUPTION_JETS, EruptionFx.JET_REROLL));
+        for (EruptionFx.Row r : EruptionFx.ROWS)
+            l.add(String.format(Locale.ROOT, "eruption: %s (%s, %s) from %.2fs%s", r.name().replace("Eruption: ", ""), r.type().id, r.shape().name().toLowerCase(Locale.ROOT), an.breach() + r.start(),
+                    r.isBurst() ? ", burst " + t(r.amount()) + " over " + t(r.over()) + "s" : ", " + t(r.amount()) + "/s until " + String.format(Locale.ROOT, "%.2fs", an.breach() + EruptionFx.ERUPTION_SUSTAIN)));
+        return l;
+    }
+
+    /** The eruption rows as log lines, every number of the row. */
+    public static List<String> eruptionSheetLines(FxAnchors.Anchors an) {
+        List<String> l = new ArrayList<>();
+        for (EruptionFx.Row r : EruptionFx.ROWS)
+            l.add(String.format(Locale.ROOT, "eruption %s: %s %s %s start %.2fs %s ring %s radJit %s yJit %s up %s out %s spread %s grav %s drag %s size %s endScale %s life %d-%d tint #%06X alpha %s", r.name(), r.type().id,
+                    r.mode().name().toLowerCase(Locale.ROOT), r.shape().name().toLowerCase(Locale.ROOT), an.breach() + r.start(), r.isBurst() ? "count " + t(r.amount()) + " over " + t(r.over()) + "s" : "rate " + t(r.amount()) + "/s",
+                    t(r.ring()), t(r.radJit()), t(r.yJit()), t(r.up()), t(r.out()), t(r.spread()), t(r.grav()), t(r.drag()), t(r.size()), t(r.endScale()), r.lifeMin(), r.lifeMax(), r.tint(), t(r.alpha())));
+        return l;
+    }
+
     // ---- the geometry of the worm at one instant ----
 
     public static final class FxGeometry {
@@ -321,6 +473,8 @@ public final class FxPlayer {
         /** Tip and axis of the head, the joints, and the first point where the axis (from the tip) passes the base level. Model frame: (y, z). */
         public static final class Snapshot {
             public double tipZ, tipY, axY, axZ, crossZ = Double.NaN;
+            /** The entry and the exit crossing of the axis with the base level (prompt 10). Crash, emerge, engulf: entryZ = crossZ, no exit. Crest: the entry hole and the exit hole. */
+            public double entryZ = Double.NaN, exitZ = Double.NaN;
             public double[][] joints;
         }
 
@@ -350,6 +504,25 @@ public final class FxPlayer {
                 }
                 az = bz;
                 ay = by;
+            }
+            if (!m.kind.equals("crest")) g.entryZ = g.crossZ;
+            else {
+                // all crossings from the tip: tip above the sand -> the first is the entry; tip below -> the first is the exit and a second (if the body still passes it) the entry
+                double[] zs = new double[2];
+                int n = 0;
+                double pz = tip[0], py = tip[1];
+                for (int k = 0; k <= p.segments && n < 2; k++) {
+                    double bz = p.joints[k][2], by = p.joints[k][1];
+                    if ((py > 0) != (by > 0)) zs[n++] = pz + py / (py - by) * (bz - pz);
+                    pz = bz;
+                    py = by;
+                }
+                if (tip[1] > 0) g.entryZ = n > 0 ? zs[0] : Double.NaN;
+                else if (n == 1) g.exitZ = zs[0];
+                else if (n == 2) {
+                    g.exitZ = zs[0];
+                    g.entryZ = zs[1];
+                }
             }
             return g;
         }

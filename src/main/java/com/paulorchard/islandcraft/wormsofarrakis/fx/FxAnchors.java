@@ -23,7 +23,9 @@ import java.util.Locale;
 public final class FxAnchors {
     private FxAnchors() {}
 
-    public record Anchors(double approach, double breach, double closeStart, double riseEnd, double fallStart, double reentry, double end, double holeZ, double reentryZ) {
+    public record Anchors(double approach, double breach, double closeStart, double riseEnd, double fallStart, double reentry, double end, double holeZ, double reentryZ, double apex, String kind) {
+        public boolean crest() { return "crest".equals(kind); }
+
         public double at(Anchor a) {
             return switch (a) {
                 case APPROACH -> approach;
@@ -33,12 +35,14 @@ public final class FxAnchors {
                 case FALL_START -> fallStart;
                 case REENTRY -> reentry;
                 case END -> end;
+                case APEX -> apex;
             };
         }
 
         public String line() {
-            return String.format(Locale.ROOT, "approach=%.2f breach=%.2f closeStart=%.2f riseEnd=%.2f fallStart=%.2f reentry=%.2f end=%.2f (holeZ=%.2f reentryZ=%.2f)",
+            String s = String.format(Locale.ROOT, "approach=%.2f breach=%.2f closeStart=%.2f riseEnd=%.2f fallStart=%.2f reentry=%.2f end=%.2f (holeZ=%.2f reentryZ=%.2f)",
                     approach, breach, closeStart, riseEnd, fallStart, reentry, end, holeZ, reentryZ);
+            return crest() ? s + String.format(Locale.ROOT, " apex=%.2f", apex) : s;
         }
     }
 
@@ -74,19 +78,36 @@ public final class FxAnchors {
         return Double.NaN;
     }
 
+    /** Time of the highest head tip in [from, to]. */
+    private static double highest(Moves.Move m, double from, double to) {
+        double bt = from, by = -1e18;
+        for (double t = from; t <= to + 1e-9; t += SCAN_STEP) {
+            double y = tipHeight(m, t);
+            if (y > by) {
+                by = y;
+                bt = t;
+            }
+        }
+        return bt;
+    }
+
     /** closeEnd: {@link MouthAnim#CLOSE_END_DEFAULT_MARK} for the move's default. */
     public static Anchors of(Moves.Move m, double closeTime, double closeEnd) {
         double end = m.playTime();
         double approach = firstAbove(m, -3 * m.r0, 0, end);
         double breach = firstAbove(m, 0, 0, end);
         boolean hasHold = m.kind.equals("emerge") || m.kind.equals("fall") || m.kind.equals("engulf");
-        double riseEnd = hasHold ? m.advanceTime : Double.NaN;
-        double fallStart = hasHold ? m.advanceTime + m.hold : Double.NaN;
+        boolean crest = m.kind.equals("crest");
+        double apex = crest ? m.apexTime() : highest(m, Double.isNaN(breach) ? 0 : breach, end);
+        MouthAnim.Timing mt = MouthAnim.timing(m, closeTime, closeEnd);
+        // crest (prompt 10): no hold; the end of the rise is the end of the mouth closing (apex + close_end) and the fall starts at the apex
+        double riseEnd = hasHold ? m.advanceTime : crest ? mt.tEnd() : Double.NaN;
+        double fallStart = hasHold ? m.advanceTime + m.hold : crest ? apex : Double.NaN;
         double reentryFrom = hasHold ? fallStart : m.kind.equals("crest") ? m.apexTime() : Double.isNaN(breach) ? 0 : breach;
         double reentry = firstBelow(m, reentryFrom, end);
-        double closeStart = MouthAnim.timing(m, closeTime, closeEnd).tStart();
+        double closeStart = mt.tStart();
         double holeZ = Double.isNaN(breach) ? 0 : tipZ(m, breach);
         double reentryZ = Double.isNaN(reentry) ? holeZ : tipZ(m, reentry);
-        return new Anchors(approach, breach, closeStart, riseEnd, fallStart, reentry, end, holeZ, reentryZ);
+        return new Anchors(approach, breach, closeStart, riseEnd, fallStart, reentry, end, holeZ, reentryZ, apex, m.kind);
     }
 }

@@ -6,6 +6,7 @@ import com.paulorchard.islandcraft.wormsofarrakis.fx.FxOptions;
 import com.paulorchard.islandcraft.wormsofarrakis.fx.FxPlayer;
 import com.paulorchard.islandcraft.wormsofarrakis.fx.FxSink;
 import com.paulorchard.islandcraft.wormsofarrakis.fx.ParticleModel;
+import com.paulorchard.islandcraft.wormsofarrakis.fx.PuffTracker;
 import com.paulorchard.islandcraft.wormsofarrakis.test.FxFlags;
 import com.paulorchard.islandcraft.wormsofarrakis.test.MoveFactory;
 import com.paulorchard.islandcraft.wormsofarrakis.test.TestWormEntity;
@@ -57,6 +58,18 @@ public final class FxClient {
         FxPlayer player;
     }
 
+    /** The puffs that shrink and fade (prompt 10); ticked every client tick, also when no worm is left, until the last puff has died. */
+    private static final PuffTracker TRACKER = new PuffTracker();
+    private static long lastTrackerLog, trackerWorstUs;
+    private static int trackerPeak;
+
+    /** A particle seen by the tracker: the size is the particle's quadSize (made public by the access transformer; no bounding box work), the opacity its alpha field. */
+    private record QuadPuff(SingleQuadParticle q) implements PuffTracker.Puff {
+        @Override public boolean alive() { return q.isAlive(); }
+        @Override public void setSize(float size) { q.quadSize = size; }
+        @Override public void setAlpha(float alpha) { q.alpha = alpha; }
+    }
+
     private static final Map<Integer, State> STATES = new HashMap<>();
     private static final Map<String, SoundEvent> EVENTS = new HashMap<>();
     private static final Set<String> MISSING = new HashSet<>();
@@ -82,7 +95,19 @@ public final class FxClient {
         ClientLevel level = mc.level;
         if (level == null) {
             dropAll("level closed");
+            TRACKER.clear();
             return;
+        }
+        if (TRACKER.size() > 0) {
+            long t0 = System.nanoTime();
+            TRACKER.tick();
+            long us = (System.nanoTime() - t0) / 1000;
+            trackerPeak = Math.max(trackerPeak, TRACKER.size());
+            trackerWorstUs = Math.max(trackerWorstUs, us);
+            if (level.getGameTime() - lastTrackerLog >= 100 && trackerPeak > 0 && !STATES.isEmpty()) {
+                lastTrackerLog = level.getGameTime();
+                WormsOfArrakis.LOGGER.info("[WormsOfArrakis] fx puffs: {} followed now, peak {}, worst tick {} us (shrink and fade bookkeeping)", TRACKER.size(), trackerPeak, trackerWorstUs);
+            }
         }
         Set<Integer> seen = new HashSet<>();
         for (Entity e : level.entitiesForRendering()) {
@@ -181,7 +206,7 @@ public final class FxClient {
                 if (status == ParticleStatus.DECREASED && java.util.concurrent.ThreadLocalRandom.current().nextInt(3) == 0) return;
             }
             ParticleOptions po = switch (s.type()) {
-                case BLOCK -> new BlockParticleOption(ParticleTypes.BLOCK, Blocks.SAND.defaultBlockState());
+                case BLOCK, CHUNK -> new BlockParticleOption(ParticleTypes.BLOCK, Blocks.SAND.defaultBlockState());   // a chunk is a sand block particle scaled to 1/4 block
                 case DUST_PLUME -> ParticleTypes.DUST_PLUME;
                 case CLOUD -> ParticleTypes.CLOUD;
                 case EXPLOSION -> ParticleTypes.EXPLOSION;
@@ -194,14 +219,21 @@ public final class FxClient {
             Particle p = mc.particleEngine.createParticle(po, px, py, pz, aux, 0, 0);
             if (p == null) return;
             if (s.type() != CrashFx.PType.EXPLOSION) {
-                double k = ParticleModel.driftFactor(s.type(), s.life());
+                double k = s.shaped() ? ParticleModel.driftFactor(s.type(), s.life(), s.drag()) : ParticleModel.driftFactor(s.type(), s.life());
                 double vx = s.vx() * k, vy = s.vy() * k, vz = s.vz() * k;
                 p.setParticleSpeed(vx * cos - vz * sin, vy, vx * sin + vz * cos);
                 double sc = ParticleModel.scaleFor(s.type(), s.size());
                 if (Math.abs(sc - 1) > 0.01) p.scale((float) sc);
             }
             p.setLifetime(s.life());
-            if (s.tint() >= 0 && p instanceof SingleQuadParticle q) q.setColor(((s.tint() >> 16) & 255) / 255f, ((s.tint() >> 8) & 255) / 255f, (s.tint() & 255) / 255f);
+            if (s.shaped() && p instanceof SingleQuadParticle q) {
+                // prompt 10: the tint times the per-particle shade (clamped to 1); the puffs get the sheet's gravity and the fade and shrink bookkeeping
+                float sh = (float) s.shade();
+                q.setColor(Math.min(1f, ((s.tint() >> 16) & 255) / 255f * sh), Math.min(1f, ((s.tint() >> 8) & 255) / 255f * sh), Math.min(1f, (s.tint() & 255) / 255f * sh));
+                if (s.type() == CrashFx.PType.CLOUD || s.type() == CrashFx.PType.DUST_PLUME) q.gravity = (float) s.grav();   // access transformer: Particle.gravity is protected
+                if (s.type() == CrashFx.PType.CLOUD || s.type() == CrashFx.PType.DUST_PLUME || s.endScale() != 1)
+                    TRACKER.add(new QuadPuff(q), q.quadSize, (float) s.endScale(), (float) s.alpha(), s.life());
+            } else if (s.tint() >= 0 && p instanceof SingleQuadParticle q) q.setColor(((s.tint() >> 16) & 255) / 255f, ((s.tint() >> 8) & 255) / 255f, (s.tint() & 255) / 255f);
         }
     }
 }

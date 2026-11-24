@@ -338,8 +338,11 @@ final class TestCommand {
             notice(ctx, FxPlayer.headerLine(m.label(), m.width, o, m.r0, FxFlags.sound, FxFlags.particles, FxFlags.solo));
             notice(ctx, "anchors (s): " + a.line());
             for (String line : FxPlayer.chatLines(a)) ctx.getSource().sendSuccess(() -> Component.literal(line), false);
+            if (o.eruption()) for (String line : FxPlayer.eruptionChatLines(a)) ctx.getSource().sendSuccess(() -> Component.literal(line), false);
+            else notice(ctx, "eruption: off (eruption=on to play the rows of the breach eruption)");
             notice(ctx, fxRegistryLine());
             for (String line : FxPlayer.sheetLines(a)) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] fx sheet: {}", line);
+            for (String line : FxPlayer.eruptionSheetLines(a)) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] fx sheet: {}", line);
             return 1;
         }
         return fail(ctx, "fx: no moving worm to read the anchors from (spawn one first, for example crash 16 120)");
@@ -459,8 +462,8 @@ final class TestCommand {
         FxOptions fo = MoveFactory.fxOptions(s);
         if (fo.on()) {
             FxAnchors.Anchors an = FxAnchors.of(m, MoveFactory.closeTime(s), MoveFactory.closeEnd(s));
-            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} fx: on sound={} particles={} fxvol={} fxcount={} count scale={} (r0={}, min(r0/8, {})) sound plays={} anchors: {}", m.label(), fo.sound() ? "on" : "off", fo.particles() ? "on" : "off",
-                    trim(fo.vol()), trim(fo.count()), String.format(Locale.ROOT, "%.2f", fo.countScale(m.r0)), String.format(Locale.ROOT, "%.2f", m.r0), CrashFx.MAX_AUTO_SCALE,
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} fx: on sound={} particles={} fxvol={} fxcount={} eruption={} count scale={} (r0={}, min(r0/8, {})) sound plays={} anchors: {}", m.label(), fo.sound() ? "on" : "off", fo.particles() ? "on" : "off",
+                    trim(fo.vol()), trim(fo.count()), fo.eruption() ? "on" : "off", String.format(Locale.ROOT, "%.2f", fo.countScale(m.r0)), String.format(Locale.ROOT, "%.2f", m.r0), CrashFx.MAX_AUTO_SCALE,
                     FxPlayer.expand(an, fo, 0).size(), an.line());
             WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {}", fxRegistryLine());
         } else {

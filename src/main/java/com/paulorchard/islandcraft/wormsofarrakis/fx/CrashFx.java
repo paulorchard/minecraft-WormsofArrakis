@@ -14,7 +14,9 @@ public final class CrashFx {
 
     /** The instants of a move that rows are fixed to (see {@link FxAnchors}). */
     public enum Anchor {
-        APPROACH("approach"), BREACH("breach"), CLOSE_START("closeStart"), RISE_END("riseEnd"), FALL_START("fallStart"), REENTRY("reentry"), END("end");
+        APPROACH("approach"), BREACH("breach"), CLOSE_START("closeStart"), RISE_END("riseEnd"), FALL_START("fallStart"), REENTRY("reentry"), END("end"),
+        /** Prompt 10: the instant the head tip is highest (the crest uses it). */
+        APEX("apex");
         public final String label;
         Anchor(String label) { this.label = label; }
     }
@@ -63,6 +65,8 @@ public final class CrashFx {
     /** Particle types of the sheet. {@code vanillaWidth}: the mean full width in blocks of one quad of the type as the game makes it (read from the 26.1.2 sources, see the report). */
     public enum PType {
         BLOCK("block", 0.15, false), DUST_PLUME("dust_plume", 0.225, false), CLOUD("cloud", 0.5625, false), EXPLOSION("explosion", 4.0, true),
+        /** Prompt 10: a sand block flying at 1/4 size: made as a sand block particle (vanilla width 0.15) and scaled to the size of the row. */
+        CHUNK("chunk", 0.15, false),
         POOF("poof", 0.5, true), LARGE_SMOKE("large_smoke", 0.5, false);
         public final String id;
         public final double vanillaWidth;
@@ -115,7 +119,7 @@ public final class CrashFx {
     /** Vanilla keeps 16384 quad particles per client (ParticleGroup.MAX_PARTICLES; one group for all quads, shared with the rest of the world). */
     public static final int VANILLA_PARTICLE_CAP = 16384;
     /** Particles alive that the sheet keeps itself under. */
-    public static final int BUDGET = 12000;
+    public static final int BUDGET = 14000;   // prompt 10: raised from 12000 so the approved eruption (about 13800 alive at W16) passes unthinned; the vanilla cap is 16384
 
     public static final double MAX_FXVOL = 2, MAX_FXCOUNT = 3;
 

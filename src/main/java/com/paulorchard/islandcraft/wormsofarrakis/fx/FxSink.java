@@ -17,5 +17,12 @@ public interface FxSink {
     default void log(String line) {}
 
     /** One particle to make: type, position, velocity (blocks per tick), lifetime (ticks), full width (blocks), gravity factor of the sheet, tint (0xRRGGBB or -1) and the row. */
-    record Spawn(CrashFx.PType type, double x, double y, double z, double vx, double vy, double vz, int life, double size, double grav, int tint, int row) {}
+    record Spawn(CrashFx.PType type, double x, double y, double z, double vx, double vy, double vz, int life, double size, double grav, int tint, int row,
+                 double endScale, double alpha, double shade, double drag, boolean shaped) {
+        /** A particle of the prompt 09 sheet: no shrink, opaque, no shade, the default drag, not shaped. */
+        public Spawn(CrashFx.PType type, double x, double y, double z, double vx, double vy, double vz, int life, double size, double grav, int tint, int row) {
+            this(type, x, y, z, vx, vy, vz, life, size, grav, tint, row, 1, 1, 1, 0.98, false);
+        }
+    }
+    // Prompt 10 (eruption rows, shaped = true): endScale = size at death / start size, alpha = opacity (faded for puffs), shade = colour factor, drag = the previs's per-tick velocity factor.
 }

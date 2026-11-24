@@ -70,7 +70,8 @@ public final class MoveOptions {
                         kind.equals("crest") ? "seconds after the highest point of the head tip at which the closing ends" : "seconds after the start of the hold at which the closing ends"),
                 num("open_deg", HeadSpec.OPEN_DEGREES, 0, HeadSpec.OPEN_DEGREES, true, "0..45", "the start (open) angle in degrees"),
                 new Key("teeth", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the bristles on the mandibles and the throat"),
-                new Key("fx", Type.ONOFF, kind.equals("crest") ? 0 : 1, 0, 1, false, kind.equals("crest") ? "off" : "on", "on|off", "the crash sounds and particles of the sheet (prompt 09)" + (kind.equals("crest") ? "; on a crest only the rows anchored at approach, breach and reentry play" : "")),
+                new Key("fx", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the sounds and particles of the sheet (prompts 09 and 10; on a crest the entry and the exit both play)"),
+                new Key("eruption", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the eruption rows of the breach: jets of sand, dust columns, flying sand blocks, the dust bank (prompt 10)"),
                 new Key("fxsound", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the sounds of the sheet"),
                 new Key("fxparticles", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the particles of the sheet"),
                 num("fxvol", 1, 0, CrashFx.MAX_FXVOL, true, "0..2", "multiplier on the volume of every sound cue (above 1 a sound is heard further, not louder)"),
@@ -258,9 +259,7 @@ public final class MoveOptions {
         }
         spec = MoveFactory.withMouth(spec, mouthMode, v.get("close_time"), closeEndArg, v.get("open_deg"), teeth);
         boolean fxOn = givenText.containsKey("fx") ? givenText.get("fx").equals("on") : FxOptions.defaultOn(spec.mode());
-        FxOptions fx = new FxOptions(fxOn, !"off".equals(givenText.get("fxsound")), !"off".equals(givenText.get("fxparticles")), v.get("fxvol"), v.get("fxcount"));
-        if (fxOn && move.equals("crest") && givenText.containsKey("fx"))
-            notes.add("fx=on on a crest: only the rows anchored at approach, breach and reentry play (a crest has no end of the rise and no fall start)");
+        FxOptions fx = new FxOptions(fxOn, !"off".equals(givenText.get("fxsound")), !"off".equals(givenText.get("fxparticles")), v.get("fxvol"), v.get("fxcount"), !"off".equals(givenText.get("eruption")));
         spec = MoveFactory.withFx(spec, fx);
         return new Parsed(spec, force, mouthOpen, loop, notes, v);
     }

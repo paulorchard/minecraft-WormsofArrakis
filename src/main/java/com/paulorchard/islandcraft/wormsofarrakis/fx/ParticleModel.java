@@ -34,13 +34,31 @@ public final class ParticleModel {
     /** The velocity multiplier that makes a particle of this type and life drift as far as the previs's (1 for block grains and the explosion). */
     public static double driftFactor(PType t, int life) {
         if (t != PType.CLOUD && t != PType.DUST_PLUME) return 1;
+        return driftFactor(t, life, PREVIS_FRICTION);
+    }
+
+    /** Prompt 10: the same for a row with its own drag (the previs's per-tick velocity factor); 1 for the explosion. Block grains with drag 0.98 give exactly 1; chunks (0.99) a little more. */
+    public static double driftFactor(PType t, int life, double drag) {
+        if (t == PType.EXPLOSION) return 1;
         double previs = 0, prod = 1;
         for (int k = 1; k <= life; k++) {
-            prod *= PREVIS_FRICTION;
+            prod *= drag;
             previs += prod;
         }
         return previs / travelSum(t, life);
     }
+
+    /** The opacity factor of a puff at age fraction f (0..1): in over the first 15 percent, 1 up to 60 percent, then out to 0 at death. */
+    public static double fade(double f) {
+        if (f <= 0) return 0;
+        if (f < EruptionFx.FADE_IN) return f / EruptionFx.FADE_IN;
+        double outStart = 1 - EruptionFx.FADE_OUT;
+        if (f <= outStart) return 1;
+        return Math.max(0, 1 - (f - outStart) / EruptionFx.FADE_OUT);
+    }
+
+    /** Size at age fraction f: start x (1 + (endScale - 1) f), linear. */
+    public static double sizeAt(double start, double endScale, double f) { return start * (1 + (endScale - 1) * Math.max(0, Math.min(1, f))); }
 
     /** Explosion particle: the size parameter xAux that gives a quad of the wanted full width (quad half-size = 2 x (1 - size / 2)). */
     public static double explosionParam(double widthBlocks) { return 2 * (1 - widthBlocks / 4); }
