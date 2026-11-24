@@ -5,6 +5,7 @@ import com.paulorchard.islandcraft.wormsofarrakis.geometry.HeadMouth;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.ScaleMath;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.ShingleMath;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.Stagger;
+import com.paulorchard.islandcraft.wormsofarrakis.geometry.TailMath;
 
 /**
  * Builds the shingle skin of a path-driven worm for the drawn segments only (plus one neighbour on each side so the
@@ -20,8 +21,10 @@ public final class WormSkin {
     public final ShingleMath.Result result;
     /** Quads of the flaps (part of result.quads). */
     public final int flapQuads;
+    /** Prompt 10: the tapering tail of a crest (empty for every other move and when the tail is off). */
+    public final ShingleMath.Result tail;
 
-    private WormSkin(WormPose pose, ChainMath chain, boolean[] drawn, int from, int to, ShingleMath.Result result, int flapQuads) {
+    private WormSkin(WormPose pose, ChainMath chain, boolean[] drawn, int from, int to, ShingleMath.Result result, int flapQuads, ShingleMath.Result tail) {
         this.pose = pose;
         this.chain = chain;
         this.drawn = drawn;
@@ -29,6 +32,7 @@ public final class WormSkin {
         this.to = to;
         this.result = result;
         this.flapQuads = flapQuads;
+        this.tail = tail;
     }
 
     public static WormSkin build(WormPose pose, int n, double r0, SurfaceProvider surface, ShingleMath.Options options) {
@@ -36,16 +40,33 @@ public final class WormSkin {
     }
 
     public static WormSkin build(WormPose pose, int n, double r0, SurfaceProvider surface, ShingleMath.Options options, double mouthOpenDeg) {
+        return build(pose, n, r0, surface, options, mouthOpenDeg, null, 0);
+    }
+
+    /**
+     * As above with the tail of a crest (prompt 10): from joint n0 = round(segments x (1 - taillen)) the body is not the shingle skin but the tapering frusta of
+     * {@link TailMath} (and the cap); with a null or an off tail it is exactly the old skin.
+     */
+    public static WormSkin build(WormPose pose, int n, double r0, SurfaceProvider surface, ShingleMath.Options options, double mouthOpenDeg, TailMath.Spec tailSpec, double width) {
         boolean[] drawn = pose.drawn(r0, surface);
         int first = -1, last = -1;
         for (int k = 0; k < drawn.length; k++) if (drawn[k]) { if (first < 0) first = k; last = k; }
         ChainMath chain = pose.chain(r0);
-        if (first < 0) return new WormSkin(pose, chain, drawn, 0, -1, new ShingleMath.Result(), 0);
+        if (first < 0) return new WormSkin(pose, chain, drawn, 0, -1, new ShingleMath.Result(), 0, new ShingleMath.Result());
         int from = Math.max(0, first - 1), to = Math.min(pose.segments - 1, last + 1);
         // prompt 08: every ring takes the one uniform roll that puts the upper jaw on top; the mouth itself (shell, throat, teeth) is HeadMouth,
         // built in the head's local frame and cached per angle by the renderer, so the flaps are no longer part of this result
-        ShingleMath.Result res = ShingleMath.build(chain, n, r0, 1, options.withRoll(HeadMouth.roll(n)), from, to);
-        return new WormSkin(pose, chain, drawn, from, to, res, 0);
+        int toBody = to;
+        ShingleMath.Result tail = new ShingleMath.Result();
+        if (tailSpec != null && tailSpec.on()) {
+            int n0 = TailMath.n0(pose.segments, tailSpec.len());
+            if (to >= n0) {
+                toBody = n0 - 1;
+                tail = TailMath.build(pose.chain(TailMath.radii(pose.segments, r0, tailSpec)), pose.segments, width, r0, tailSpec, from, to, options.seed(), options.jitter());
+            }
+        }
+        ShingleMath.Result res = toBody >= from ? ShingleMath.build(chain, n, r0, 1, options.withRoll(HeadMouth.roll(n)), from, toBody) : new ShingleMath.Result();
+        return new WormSkin(pose, chain, drawn, from, toBody >= from ? toBody : to, res, 0, tail);
     }
 
     /** True when the head ring (segment 0) is part of this skin, i.e. the mouth is to be drawn. */

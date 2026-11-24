@@ -176,12 +176,13 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
             WormPose pose = m.pose(s);
             ShingleMath.Options opt = visual(ShingleMath.Options.defaults(ScaleMath.LIP_LENGTH, linerMode > 0), id)
                     .withLinerColor(linerMode >= 1.5 ? ShingleMath.LINER_DARK : ShingleMath.LINER_TINT);
-            c.skin = WormSkin.build(pose, n, m.r0, surfaceFor(state), opt, 0.0);
+            c.skin = WormSkin.build(pose, n, m.r0, surfaceFor(state), opt, 0.0, MoveFactory.tailSpec(spec), m.width);
             c.exposed = pose.exposedBody(0);
             c.heights = m.headHeights(s);
             if (MOVE_CACHE.size() > 64) MOVE_CACHE.clear();
             MOVE_CACHE.put(id, c);
-            if (BODY_BUILDS.merge(id, 1, Integer::sum) % 10 == 1) checkMesh("body", id, c.skin.result, m.label() + " W" + m.width + " n=" + n);   // prompt 10 (H4): every 10th rebuild is enough
+            if (BODY_BUILDS.merge(id, 1, Integer::sum) % 10 == 1) checkMesh("body", id, c.skin.result, m.label() + " W" + m.width + " n=" + n);
+            if (c.skin.tail.quads > 0 && BODY_BUILDS.get(id) % 10 == 1) checkMesh("tail", id, c.skin.tail, m.label() + " W" + m.width + " segments=" + m.segments);   // prompt 10 (H4): every 10th rebuild is enough
             String sig = spec.mode() + n + "/" + m.segments + key;
             if (!sig.equals(LAST_MOVE_LOG)) {
                 LAST_MOVE_LOG = sig;
@@ -224,6 +225,10 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
                 }
                 ShingleStats.submitted(System.nanoTime() - s0);
             });
+        }
+        if (c.skin.tail.quads > 0) {   // prompt 10: the tapering tail of a crest, the same texture as the body (its quads are already in the model frame)
+            final ShingleMath.Result tl = c.skin.tail;
+            collector.submitCustomGeometry(poseStack, RenderTypes.entityCutoutCull(TestWormModel.TEXTURE), (pose, buffer) -> emit(tl, pose, new Matrix4f(), new Matrix3f(), buffer, light));
         }
         if (c.skin.hasHead()) submitMouth(spec, id, n, m, c.skin, id, mouthDeg, tau, poseStack, collector, light);
         poseStack.popPose();

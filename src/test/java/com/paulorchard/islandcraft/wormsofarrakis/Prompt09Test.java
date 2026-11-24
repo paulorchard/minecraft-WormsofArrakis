@@ -499,9 +499,9 @@ class Prompt09Test {
             assertTrue(h.contains("particles off, solo breach"), h);
             List<String> lines = FxPlayer.chatLines(a);
             assertEquals(CrashFx.Group.values().length + CrashFx.EMITTERS.size(), lines.size());
-            for (CrashFx.Group g : CrashFx.Group.values()) assertTrue(lines.stream().anyMatch(l -> l.startsWith("sounds [" + g.label() + "]: ")), g.label());
+            for (CrashFx.Group g : CrashFx.Group.values()) assertTrue(lines.stream().anyMatch(l -> l.startsWith("sounds [" + g.label() + "]:")), g.label());   // prompt 10: a crest has no sliding sounds, so that line is empty (no trailing space)
             for (CrashFx.Emitter e : CrashFx.EMITTERS) assertTrue(lines.stream().anyMatch(l -> l.startsWith("particles: " + e.name())), e.name());
-            assertEquals(CrashFx.CUES.size() + CrashFx.EMITTERS.size(), FxPlayer.sheetLines(a).size());
+            assertEquals(FxPlayer.cuesFor(a).size() + CrashFx.EMITTERS.size(), FxPlayer.sheetLines(a).size());
         }
         assertEquals(CrashFx.Group.TREMOR, CrashFx.Group.byLabel("tremor"));
         assertNull(CrashFx.Group.byLabel("foo"));

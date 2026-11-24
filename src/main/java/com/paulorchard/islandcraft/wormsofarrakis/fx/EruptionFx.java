@@ -13,6 +13,8 @@ public final class EruptionFx {
     private EruptionFx() {}
 
     /** A sustain row runs from its start until this many seconds after the breach. */
+    /** The smaller eruption at the exit hole of a crest (prompt 10 part 2): this fraction of the counts and rates, the sustain rows at most this many seconds. */
+    public static final double EXIT_FACTOR = 0.4, EXIT_SUSTAIN = 3.0;
     public static final double ERUPTION_SUSTAIN = 5.0;
     /** The jets (the flickering spiky tongues): how many, how often they are re-rolled, the spread of a particle round its jet's angle, the strength range. */
     public static final int ERUPTION_JETS = 14;

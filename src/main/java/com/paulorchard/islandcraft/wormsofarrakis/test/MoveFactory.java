@@ -101,31 +101,61 @@ public final class MoveFactory {
      */
     public static WormSpec withFx(WormSpec base, FxOptions o) {
         if (o.isDefault(FxOptions.defaultOn(base.mode()))) return base;
-        double[] p = java.util.Arrays.copyOf(base.p(), Math.max(32, base.p().length));
-        fillMouthDefaults(base, p);
+        double[] p = grow(base, o.xeruption() ? 32 : 34);
         p[31] = o.eruption() ? 1 : 0;
         p[26] = o.on() ? 1 : 0;
         p[27] = o.sound() ? 1 : 0;
         p[28] = o.particles() ? 1 : 0;
         p[29] = o.vol();
         p[30] = o.count();
+        if (p.length > 33) p[33] = o.xeruption() ? 1 : 0;
         return new WormSpec(base.kind(), base.mode(), p);
+    }
+
+    /** The defaults of the fx-side fields p26..p37 (a spec that stops before a field means this value). */
+    static double fxDefault(String mode, int i) {
+        return switch (i) {
+            case 26 -> FxOptions.defaultOn(mode) ? 1 : 0;
+            case 32 -> 0;      // light: probe
+            case 35 -> 0.3;    // taillen
+            case 36 -> 0.12;   // tailnub
+            case 37 -> 1.0;    // tailcurve
+            default -> 1;      // p27..p31 fx options, p33 xeruption, p34 tail on
+        };
+    }
+
+    /** A copy of the spec at least len long, never shorter than before, with the defaults in the slots the shorter spec did not have. */
+    static double[] grow(WormSpec base, int len) {
+        double[] p = java.util.Arrays.copyOf(base.p(), Math.max(Math.max(len, 26), base.p().length));
+        fillMouthDefaults(base, p);
+        for (int i = Math.max(base.p().length, 26); i < p.length; i++) p[i] = fxDefault(base.mode(), i);
+        return p;
     }
 
     /** Prompt 10: p32 light (0 probe, the default; 1 vanilla; 2 full). A spec with the default keeps its shorter length. */
     public static WormSpec withLight(WormSpec base, String mode) {
         int v = mode.equals("vanilla") ? 1 : mode.equals("full") ? 2 : 0;
         if (v == 0) return base;
-        double[] p = java.util.Arrays.copyOf(base.p(), Math.max(33, base.p().length));
-        fillMouthDefaults(base, p);
-        if (base.p().length <= 26) p[26] = FxOptions.defaultOn(base.mode()) ? 1 : 0;
-        if (base.p().length <= 27) p[27] = 1;
-        if (base.p().length <= 28) p[28] = 1;
-        if (base.p().length <= 29) p[29] = 1;
-        if (base.p().length <= 30) p[30] = 1;
-        if (base.p().length <= 31) p[31] = 1;
+        double[] p = grow(base, 33);
         p[32] = v;
         return new WormSpec(base.kind(), base.mode(), p);
+    }
+
+    /** Prompt 10: p34 tail (1/0), p35 taillen, p36 tailnub, p37 tailcurve of a crest. A spec with the defaults keeps its shorter length. */
+    public static WormSpec withTail(WormSpec base, com.paulorchard.islandcraft.wormsofarrakis.geometry.TailMath.Spec t) {
+        if (t.isDefault()) return base;
+        double[] p = grow(base, 38);
+        p[34] = t.on() ? 1 : 0;
+        p[35] = t.len();
+        p[36] = t.nub();
+        p[37] = t.curve();
+        return new WormSpec(base.kind(), base.mode(), p);
+    }
+
+    /** The tail of a spec: only a crest has one (the other moves get the off tail); the defaults when the spec is short. */
+    public static com.paulorchard.islandcraft.wormsofarrakis.geometry.TailMath.Spec tailSpec(WormSpec s) {
+        if (!s.mode().equals("crest")) return com.paulorchard.islandcraft.wormsofarrakis.geometry.TailMath.Spec.OFF;
+        return new com.paulorchard.islandcraft.wormsofarrakis.geometry.TailMath.Spec(s.p(34, 1) > 0, s.p(35, 0.3), s.p(36, 0.12), s.p(37, 1.0));
     }
 
     /** The light mode of a spec (default probe). */
@@ -136,7 +166,7 @@ public final class MoveFactory {
 
     /** The effect options of a spec (defaults when the spec is short). */
     public static FxOptions fxOptions(WormSpec s) {
-        return new FxOptions(s.p(26, FxOptions.defaultOn(s.mode()) ? 1 : 0) > 0, s.p(27, 1) > 0, s.p(28, 1) > 0, s.p(29, 1), s.p(30, 1), s.p(31, 1) > 0);
+        return new FxOptions(s.p(26, FxOptions.defaultOn(s.mode()) ? 1 : 0) > 0, s.p(27, 1) > 0, s.p(28, 1) > 0, s.p(29, 1), s.p(30, 1), s.p(31, 1) > 0, s.p(33, 1) > 0);
     }
 
     /** The mouth closing numbers of a spec (for the anchors): close_time and close_end. */

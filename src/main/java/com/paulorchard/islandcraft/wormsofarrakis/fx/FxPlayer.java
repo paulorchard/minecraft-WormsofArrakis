@@ -37,8 +37,10 @@ public final class FxPlayer {
     private final double[] acc;
     private final long seed;
     private final Random rngE;
-    private long jetEpoch = Long.MIN_VALUE;
-    private Jets jets;
+    private final Jets[] jets = new Jets[2];
+    private final long[] jetEpochs = {Long.MIN_VALUE, Long.MIN_VALUE};
+    private final List<Cue> cues;
+    private final double closeTime, closeEnd;
     private double lastEntryZ = Double.NaN, lastExitZ = Double.NaN;
 
     private boolean cancelled;
@@ -62,6 +64,9 @@ public final class FxPlayer {
         this.m = m;
         this.opt = opt;
         this.a = FxAnchors.of(m, closeTime, closeEnd);
+        this.closeTime = closeTime;
+        this.closeEnd = closeEnd;
+        this.cues = cuesFor(a);
         this.schedule = expand(a, opt, seed);
         this.rng = new Random(seed * 7919L + 17);
         this.scale = opt.countScale(m.r0);
@@ -79,15 +84,15 @@ public final class FxPlayer {
             double start = a.at(e.from()) + e.off();
             Anchor until = e.until();
             int site = 0;
-            if (crest) {   // prompt 10 part 2: the crest has no hold; its fall is the dive into the exit hole
+            if (crest) {   // prompt 10 part 2: the crest has no hold rows; its fall is the dive into the exit hole; the rise rows go on until the tail is under
                 if (e.from() == Anchor.RISE_END && e.until() == Anchor.FALL_START) continue;
                 if (e.from() == Anchor.FALL_START) {
                     start = a.reentry() + e.off();
                     until = Anchor.END;
                     site = 1;
-                } else if (e.until() == Anchor.RISE_END) until = Anchor.APEX;
+                } else if (e.until() == Anchor.RISE_END) until = Anchor.END;
                 else if (e.from() == Anchor.REENTRY) site = 1;
-                else if (CrashFx.isBaseMask(e)) addLane(i, false, 1, a.reentry() + e.off(), a.end(), e.rate(), 0, 0);
+                else if (CrashFx.isBaseMask(e)) addLane(i, false, 1, start, a.end(), e.rate(), 0, 0);   // any: every crossing that exists
             }
             if (Double.isNaN(start)) continue;
             if (e.isBurst()) addLane(i, false, site, start, Double.NaN, 0, e.burst(), 0);
@@ -100,6 +105,11 @@ public final class FxPlayer {
             int row = CrashFx.EMITTERS.size() + j;
             if (r.isBurst()) addLane(row, true, 0, start, start + r.over(), r.amount() / r.over(), (int) r.amount(), start + r.over() / 2);
             else addLane(row, true, 0, start, a.breach() + EruptionFx.ERUPTION_SUSTAIN, r.amount(), 0, 0);
+            if (a.crest() && opt.xeruption() && !Double.isNaN(a.reentry())) {   // the smaller eruption at the exit hole: 40 percent, the sustain rows at most 3 s
+                double xs = a.reentry() + r.start(), f = EruptionFx.EXIT_FACTOR;
+                if (r.isBurst()) addLane(row, true, 1, xs, xs + r.over(), r.amount() * f / r.over(), (int) Math.round(r.amount() * f), xs + r.over() / 2);
+                else addLane(row, true, 1, xs, a.reentry() + EruptionFx.EXIT_SUSTAIN, r.amount() * f, 0, 0);
+            }
         }
     }
 
@@ -129,7 +139,7 @@ public final class FxPlayer {
     public static long jetEpoch(double t, double breach) { return (long) Math.floor((t - breach) / EruptionFx.JET_REROLL); }
 
     /** The jets in use at the last tick (null before the first eruption tick). */
-    public Jets currentJets() { return jets; }
+    public Jets currentJets() { return jets[0]; }
 
     public FxAnchors.Anchors anchors() { return a; }
     public List<Play> schedule() { return schedule; }
@@ -162,8 +172,9 @@ public final class FxPlayer {
     public static List<Play> expand(FxAnchors.Anchors a, FxOptions opt, long seed) {
         List<Play> l = new ArrayList<>();
         if (!opt.on() || !opt.sound() || opt.vol() <= 0) return l;
-        for (int c = 0; c < CrashFx.CUES.size(); c++) {
-            Cue cue = CrashFx.CUES.get(c);
+        List<Cue> cs = cuesFor(a);
+        for (int c = 0; c < cs.size(); c++) {
+            Cue cue = cs.get(c);
             if (a.crest() && cue.group() == CrashFx.Group.SLIDE) continue;   // the crest has no hold
             double base = a.at(effAnchor(a, cue));
             if (Double.isNaN(base)) continue;
@@ -176,6 +187,12 @@ public final class FxPlayer {
         l.sort((p, q) -> Double.compare(p.time(), q.time()));
         return l;
     }
+
+    /** The sound rows of a move: the crash sheet, or the crest sheet of prompt 10 for a crest (its "until end" rows with their computed repeat counts). */
+    public static List<Cue> cuesFor(FxAnchors.Anchors a) { return a.crest() ? CrestFx.cues(a) : CrashFx.CUES; }
+
+    /** The sound rows of this player (the index of {@link Play#cue()}). */
+    public List<Cue> cues() { return cues; }
 
     /** The anchor a cue is really fixed to: on a crest the fall (rushing sand) starts at the reentry, the dive into the exit hole. */
     public static Anchor effAnchor(FxAnchors.Anchors a, Cue c) { return a.crest() && c.anchor() == Anchor.FALL_START ? Anchor.REENTRY : c.anchor(); }
@@ -229,7 +246,7 @@ public final class FxPlayer {
 
         while (next < schedule.size() && schedule.get(next).time() <= b0) {
             Play p = schedule.get(next++);
-            Cue cue = CrashFx.CUES.get(p.cue());
+            Cue cue = cues.get(p.cue());
             if (!soundOn || (solo != null && solo != cue.group())) continue;
             double z = effAnchor(a, cue) == Anchor.REENTRY ? a.reentryZ() : a.holeZ();
             soundsPlayed++;
@@ -237,7 +254,7 @@ public final class FxPlayer {
         }
 
         if (!opt.on() || !opt.particles() || !particlesOn || scale <= 0) return;
-        FxGeometry.Snapshot g = FxGeometry.at(m, t);
+        FxGeometry.Snapshot g = FxGeometry.at(m, t, a.crest() ? com.paulorchard.islandcraft.wormsofarrakis.path.MouthAnim.angleAt(m, t, com.paulorchard.islandcraft.wormsofarrakis.path.HeadSpec.OPEN_DEGREES, closeTime, closeEnd) : Double.NaN);
         if (!Double.isNaN(g.entryZ)) lastEntryZ = g.entryZ;
         if (!Double.isNaN(g.exitZ)) lastExitZ = g.exitZ;
         boolean[] live = {!Double.isNaN(g.entryZ), !Double.isNaN(g.exitZ)};
@@ -287,10 +304,12 @@ public final class FxPlayer {
 
         double[] siteZ = {Double.isNaN(g.entryZ) ? lastEntryZ : g.entryZ, Double.isNaN(g.exitZ) ? lastExitZ : g.exitZ};
         double R = m.r0;
-        long ep = jetEpoch(t, a.breach());
-        if (jets == null || ep != jetEpoch) {
-            jets = jetsFor(seed, ep);
-            jetEpoch = ep;
+        for (int st = 0; st < 2; st++) {   // the jets of each hole: re-rolled every 0.6 s from the breach (entry) or the reentry (exit)
+            long ep = jetEpoch(t, st == 0 ? a.breach() : a.reentry());
+            if (jets[st] == null || ep != jetEpochs[st]) {
+                jets[st] = jetsFor(seed + st * 977L, ep);
+                jetEpochs[st] = ep;
+            }
         }
         List<Integer> bodyRings = null;
         for (int i = 0; i < E; i++) {
@@ -298,7 +317,7 @@ public final class FxPlayer {
             int row = ln.row();
             for (int k = 0; k < want[i]; k++) {
                 FxSink.Spawn s;
-                if (ln.eruption()) s = erupt(EruptionFx.ROWS.get(row - CrashFx.EMITTERS.size()), row, siteZ[ln.site()], R);
+                if (ln.eruption()) s = erupt(EruptionFx.ROWS.get(row - CrashFx.EMITTERS.size()), row, siteZ[ln.site()], R, jets[ln.site()]);
                 else {
                     Emitter e = CrashFx.EMITTERS.get(row);
                     switch (e.place()) {
@@ -330,7 +349,7 @@ public final class FxPlayer {
      * x spread on each axis (the vertical x 0.5); on jets out and up are multiplied by the strength of the jet the particle picked (its angle is the jet's
      * angle plus a gaussian of 0.12 rad).
      */
-    private FxSink.Spawn erupt(EruptionFx.Row r, int row, double z0, double R) {
+    private FxSink.Spawn erupt(EruptionFx.Row r, int row, double z0, double R, Jets jets) {
         if (Double.isNaN(z0)) return null;   // no crossing yet
         double th, str = 1, rad;
         switch (r.shape()) {
@@ -423,7 +442,7 @@ public final class FxPlayer {
         List<String> l = new ArrayList<>();
         for (CrashFx.Group g : CrashFx.Group.values()) {
             StringBuilder b = new StringBuilder("sounds [").append(g.label()).append("]: ");
-            for (Cue c : CrashFx.CUES) if (c.group() == g) b.append(c.name()).append(String.format(Locale.ROOT, " (%.2fs x%d) ", an.at(c.anchor()) + c.off(), c.rep()));
+            for (Cue c : cuesFor(an)) if (c.group() == g) b.append(c.name()).append(String.format(Locale.ROOT, " (%.2fs x%d) ", an.at(c.anchor()) + c.off(), c.rep()));
             l.add(b.toString().trim());
         }
         for (Emitter e : CrashFx.EMITTERS)
@@ -435,7 +454,7 @@ public final class FxPlayer {
     /** The sheet as text lines for the fx command (cues, then emitters), with the times of this move. */
     public static List<String> sheetLines(FxAnchors.Anchors an) {
         List<String> l = new ArrayList<>();
-        for (Cue c : CrashFx.CUES)
+        for (Cue c : cuesFor(an))
             l.add(String.format(Locale.ROOT, "sound [%s] %s: %s at %s%+.2f (%.2fs) x%d%s vol %.1f pitch %.2f", c.group().label(), c.name(), c.event(), c.anchor().label, c.off(), an.at(c.anchor()) + c.off(), c.rep(),
                     c.rep() > 1 ? " every " + c.every() + "s" : "", c.vol(), c.pitch()));
         for (Emitter e : CrashFx.EMITTERS)
@@ -478,7 +497,13 @@ public final class FxPlayer {
             public double[][] joints;
         }
 
-        public static Snapshot at(Moves.Move m, double t) {
+        public static Snapshot at(Moves.Move m, double t) { return at(m, t, Double.NaN); }
+
+        /**
+         * As above; on a crest before the apex, while no part of the axis crosses the base level yet but the head already touches the sand (the upper mandible is out), the entry
+         * crossing is the centre of the head points within 0.6 blocks of the base level (prompt 10 part 2). {@code mouthDeg} = the mouth opening at t (NaN = do not look at the head).
+         */
+        public static Snapshot at(Moves.Move m, double t, double mouthDeg) {
             double s = m.at(t)[0];
             WormPose p = m.pose(s);
             double[] tip = m.tip(s);
@@ -522,6 +547,10 @@ public final class FxPlayer {
                 else if (n == 2) {
                     g.exitZ = zs[0];
                     g.entryZ = zs[1];
+                }
+                if (Double.isNaN(g.entryZ) && Double.isNaN(g.exitZ) && !Double.isNaN(mouthDeg) && t < m.apexTime()) {
+                    HeadTop.Head h = HeadTop.at(m, t, mouthDeg);
+                    if (h.top() > 0) g.entryZ = h.contactZ();
                 }
             }
             return g;

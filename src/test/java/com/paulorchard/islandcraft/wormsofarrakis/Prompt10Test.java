@@ -2,6 +2,7 @@ package com.paulorchard.islandcraft.wormsofarrakis;
 
 import com.paulorchard.islandcraft.wormsofarrakis.fx.CrashFx;
 import com.paulorchard.islandcraft.wormsofarrakis.fx.CrashFx.PType;
+import com.paulorchard.islandcraft.wormsofarrakis.fx.CrestFx;
 import com.paulorchard.islandcraft.wormsofarrakis.fx.EruptionFx;
 import com.paulorchard.islandcraft.wormsofarrakis.fx.FxAnchors;
 import com.paulorchard.islandcraft.wormsofarrakis.fx.FxOptions;
@@ -397,20 +398,23 @@ class Prompt10Test {
         FxAnchors.Anchors a = r.player.anchors();
         double R = m.r0;
         int fountain = row("Breach: sand fountain"), burst = row("Fall: re-entry burst"), pour = row("Fall: sand pouring into the hole");
-        FxPlayer.FxGeometry.Snapshot atBreach = FxPlayer.FxGeometry.at(m, a.breach() + 0.04), atReentry = FxPlayer.FxGeometry.at(m, a.reentry() + 0.04);
+        double mo = 45;
+        java.util.function.DoubleFunction<FxPlayer.FxGeometry.Snapshot> geo = t -> FxPlayer.FxGeometry.at(m, t, com.paulorchard.islandcraft.wormsofarrakis.path.MouthAnim.angleAt(m, t, mo, MoveFactory.closeTime(s), MoveFactory.closeEnd(s)));
+        FxPlayer.FxGeometry.Snapshot atReentry = geo.apply(a.reentry() + 0.04);
         int nf = 0, nb = 0, np = 0;
         for (int i = 0; i < r.spawns.size(); i++) {
             FxSink.Spawn p = r.spawns.get(i);
             double t = r.times.get(i);
             if (p.row() == fountain) {
                 nf++;
+                FxPlayer.FxGeometry.Snapshot atBreach = geo.apply(t);   // the entry hole at the instant of the burst (the head still touches the sand there)
                 assertTrue(Math.abs(Math.hypot(p.x(), p.z() - atBreach.entryZ) - 0.95 * R) < 0.6, "fountain on the entry ring");
                 assertTrue(Math.abs(p.z() - atReentry.exitZ) > R, "never at the exit");
             }
             if (p.row() == burst) {
                 nb++;
                 assertTrue(Math.abs(Math.hypot(p.x(), p.z() - atReentry.exitZ) - 0.9 * R) < 0.6, "re-entry burst on the exit ring");
-                assertTrue(Math.abs(p.z() - atBreach.entryZ) > R);
+                assertTrue(Math.abs(p.z() - geo.apply(t).entryZ) > R || Double.isNaN(geo.apply(t).entryZ));
             }
             if (p.row() == pour) {
                 np++;
@@ -429,10 +433,11 @@ class Prompt10Test {
         assertEquals(0, r.byRow(row("Hold: sand sliding off the body")), "no hold rows");
         for (FxPlayer.Lane l : r.player.lanes()) if (!l.eruption()) assertFalse(CrashFx.EMITTERS.get(l.row()).name().startsWith("Hold"));
         List<FxPlayer.Play> plays = FxPlayer.expand(a, FxOptions.full(true), 1);
-        for (FxPlayer.Play p : plays) assertNotEquals(CrashFx.Group.SLIDE, CrashFx.CUES.get(p.cue()).group());
-        assertEquals(82 - 6, plays.size(), "the crest plays 76 sounds");
+        List<CrashFx.Cue> cs = FxPlayer.cuesFor(a);
+        for (FxPlayer.Play p : plays) assertNotEquals(CrashFx.Group.SLIDE, cs.get(p.cue()).group());
+        assertEquals(CrestFx.cues(a).stream().mapToInt(CrashFx.Cue::rep).sum(), plays.size(), "the crest plays the repeats of its own sheet");
         int rush = -1;
-        for (int i = 0; i < CrashFx.CUES.size(); i++) if (CrashFx.CUES.get(i).name().equals("Fall: rushing sand")) rush = i;
+        for (int i = 0; i < cs.size(); i++) if (cs.get(i).name().equals("Fall: rushing sand")) rush = i;
         double first = 1e9;
         for (FxPlayer.Play p : plays) if (p.cue() == rush) first = Math.min(first, p.time());
         assertEquals(a.reentry() + 0.1, first, 1e-9, "rushing sand from the reentry");

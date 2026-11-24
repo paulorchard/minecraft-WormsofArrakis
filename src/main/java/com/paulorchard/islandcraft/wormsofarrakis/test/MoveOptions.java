@@ -90,7 +90,13 @@ public final class MoveOptions {
                 numText("height", Moves.DEFAULT_CREST_HEIGHT, t(Moves.DEFAULT_CREST_HEIGHT), "above 0 to " + t(Moves.MAX_CREST_HEIGHT) + ", force lifts the " + t(Moves.MAX_CREST_HEIGHT), "body widths of the highest plate above the sand (1.3 is the good reference)"),
                 numText("radius", 6, "6", "limit " + t(com.paulorchard.islandcraft.wormsofarrakis.geometry.BendLimit.MIN_BEND_RADIUS_WIDTHS) + " and up, force lifts the limit", "body widths, the way up"),
                 numText("radius_down", 0, "=radius", "limit " + t(com.paulorchard.islandcraft.wormsofarrakis.geometry.BendLimit.MIN_BEND_RADIUS_WIDTHS) + " and up, force lifts the limit", "body widths, the way down"),
-                speed()), tail(Moves.CREST_PAUSE, "crest")));
+                speed(),
+                new Key("tail", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the tapering tail of the crest (the last 30 percent of the body ends in a small rounded nub; the other moves have none)"),
+                num("taillen", com.paulorchard.islandcraft.wormsofarrakis.geometry.TailMath.DEFAULT_LEN, com.paulorchard.islandcraft.wormsofarrakis.geometry.TailMath.MIN_LEN, com.paulorchard.islandcraft.wormsofarrakis.geometry.TailMath.MAX_LEN, true, "0.1..0.6", "the fraction of the body length that tapers"),
+                num("tailnub", com.paulorchard.islandcraft.wormsofarrakis.geometry.TailMath.DEFAULT_NUB, com.paulorchard.islandcraft.wormsofarrakis.geometry.TailMath.MIN_NUB, com.paulorchard.islandcraft.wormsofarrakis.geometry.TailMath.MAX_NUB, true, "0.03..0.4", "the radius of the tip as a fraction of the body radius"),
+                num("tailcurve", com.paulorchard.islandcraft.wormsofarrakis.geometry.TailMath.DEFAULT_CURVE, com.paulorchard.islandcraft.wormsofarrakis.geometry.TailMath.MIN_CURVE, com.paulorchard.islandcraft.wormsofarrakis.geometry.TailMath.MAX_CURVE, true, "0.5..2.5", "the taper exponent: below 1 the tail stays fat longer, above 1 it thins fast"),
+                new Key("xeruption", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the smaller eruption (40 percent of the counts, at most 3 s) at the exit hole of the crest, where the head dives back")),
+                tail(Moves.CREST_PAUSE, "crest")));
         KEYS.put("emerge", join(List.of(
                 numText("n", Moves.DEFAULT_EMERGE_N, t(Moves.DEFAULT_EMERGE_N), "1..1000", "exposed body rings at the hold"),
                 numText("height", Double.NaN, "-", "above 0", "head tip height in body widths instead of n: (n + HEAD_LENGTH) x sin(angle) = height x width, n rounded; not together with n"),
@@ -264,9 +270,10 @@ public final class MoveOptions {
         }
         spec = MoveFactory.withMouth(spec, mouthMode, v.get("close_time"), closeEndArg, v.get("open_deg"), teeth);
         boolean fxOn = givenText.containsKey("fx") ? givenText.get("fx").equals("on") : FxOptions.defaultOn(spec.mode());
-        FxOptions fx = new FxOptions(fxOn, !"off".equals(givenText.get("fxsound")), !"off".equals(givenText.get("fxparticles")), v.get("fxvol"), v.get("fxcount"), !"off".equals(givenText.get("eruption")));
+        FxOptions fx = new FxOptions(fxOn, !"off".equals(givenText.get("fxsound")), !"off".equals(givenText.get("fxparticles")), v.get("fxvol"), v.get("fxcount"), !"off".equals(givenText.get("eruption")), !"off".equals(givenText.get("xeruption")));
         spec = MoveFactory.withFx(spec, fx);
         spec = MoveFactory.withLight(spec, givenText.getOrDefault("light", "probe"));
+        if (move.equals("crest")) spec = MoveFactory.withTail(spec, new com.paulorchard.islandcraft.wormsofarrakis.geometry.TailMath.Spec(!"off".equals(givenText.get("tail")), v.get("taillen"), v.get("tailnub"), v.get("tailcurve")));
         return new Parsed(spec, force, mouthOpen, loop, notes, v);
     }
 }

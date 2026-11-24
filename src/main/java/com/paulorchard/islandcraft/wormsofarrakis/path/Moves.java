@@ -15,7 +15,7 @@ public final class Moves {
     public static final double EMERGE_PAUSE = 1.0, CRASH_PAUSE = 2.0, CREST_PAUSE = 0.0, ENGULF_PAUSE = 1.5;
     public static final double DEFAULT_EXPOSED = 2, ENGULF_MAX_EXPOSED = 3, ENGULF_FORCE_MAX_EXPOSED = 6, ENGULF_HOLD = 0.5, DEFAULT_ENGULF_LEAN = 7;
     public static final double MAX_SPEED = 64;
-    public static final double DEFAULT_CREST_HEIGHT = 0.4, DEFAULT_EMERGE_N = 10, DEFAULT_EMERGE_ANGLE = 90, DEFAULT_EMERGE_HOLD = 2;
+    public static final double DEFAULT_CREST_HEIGHT = 0.7, DEFAULT_EMERGE_N = 10, DEFAULT_EMERGE_ANGLE = 90, DEFAULT_EMERGE_HOLD = 2;
 
     /** Exposed rings (real number) for a head tip height in body widths: (n + HEAD_LENGTH) x sin(angle) = height x width. */
     public static double emergeRingsForHeight(double width, double heightWidths, double angleDeg) {

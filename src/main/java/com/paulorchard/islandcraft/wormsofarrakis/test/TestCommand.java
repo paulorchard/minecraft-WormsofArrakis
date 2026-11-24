@@ -321,10 +321,12 @@ final class TestCommand {
         int soundOk = 0, partOk = 0;
         StringBuilder missing = new StringBuilder();
         java.util.Set<String> seen = new java.util.HashSet<>();
-        for (CrashFx.Cue c : CrashFx.CUES) {
-            if (!seen.add(c.event())) continue;
-            if (net.minecraft.core.registries.BuiltInRegistries.SOUND_EVENT.getValue(net.minecraft.resources.Identifier.withDefaultNamespace(c.event())) != null) soundOk++;
-            else missing.append(" sound ").append(c.event());
+        java.util.List<String> events = new java.util.ArrayList<>(CrashFx.CUES.stream().map(CrashFx.Cue::event).toList());
+        events.addAll(com.paulorchard.islandcraft.wormsofarrakis.fx.CrestFx.events());   // prompt 10: the crest sheet adds entity.warden.step and entity.warden.dig
+        for (String ev : events) {
+            if (!seen.add(ev)) continue;
+            if (net.minecraft.core.registries.BuiltInRegistries.SOUND_EVENT.getValue(net.minecraft.resources.Identifier.withDefaultNamespace(ev)) != null) soundOk++;
+            else missing.append(" sound ").append(ev);
         }
         int sounds = seen.size();
         java.util.Set<String> types = new java.util.HashSet<>();

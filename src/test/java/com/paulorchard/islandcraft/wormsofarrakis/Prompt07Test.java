@@ -59,7 +59,7 @@ class Prompt07Test {
     @Test void theOldPositionalFormsGiveTheSameSpecsAsBefore() {
         // crest 16 60 0.5 12 (height, speed) and the defaults
         assertEquals(anim(MoveFactory.spec("crest", 16, 60, 0.5, 6, 12, 0, 0, 0, false, true, false, 1.0, 1.0, 1)).serialize(), parse("crest", 16, 60, "0.5 12").spec().serialize());
-        assertEquals(anim(MoveFactory.spec("crest", 16, 60, 0.4, 6, 12, 0, 0, 0, false, true, false, 1.0, 1.0, 1)).serialize(), parse("crest", 16, 60, "").spec().serialize());
+        assertEquals(anim(MoveFactory.spec("crest", 16, 60, 0.7, 6, 12, 0, 0, 0, false, true, false, 1.0, 1.0, 1)).serialize(), parse("crest", 16, 60, "").spec().serialize());
         assertEquals(parse("crest", 16, 60, "0.5 12").spec().serialize(), parse("crest", 16, 60, "speed=12 height=0.5").spec().serialize());
         assertEquals(parse("crest", 16, 60, "height=0.5").spec().serialize(), parse("crest", 16, 60, "crest_fraction=0.5").spec().serialize());
         assertEquals(anim(MoveFactory.spec("crest", 16, 80, 1.3, 6, 6, 0, 3, 0, false, true, false, 1.0, 1.0, 1)).serialize(), parse("crest", 16, 80, "height=1.3 radius=6 radius_down=3 speed=6").spec().serialize());
@@ -182,7 +182,7 @@ class Prompt07Test {
             assertTrue(lines.get(i).contains("force"));
             for (String common : new String[]{"speed", "pause", "loop", "mouth"}) assertTrue(lines.get(i).contains(common + "="), move + " has " + common);
         }
-        assertTrue(lines.get(0).contains("radius_down=") && lines.get(0).contains("height=0.4"));
+        assertTrue(lines.get(0).contains("radius_down=") && lines.get(0).contains("height=0.7"));
         assertTrue(lines.get(1).contains("retreat_speed=") && lines.get(1).contains("n=10") && lines.get(1).contains("height="));
         assertTrue(lines.get(2).contains("min_radius=") && lines.get(2).contains("lean=7") && lines.get(2).contains("gravity=12"));
         assertTrue(lines.get(3).contains("exposed=2") && lines.get(3).contains("hold=0.5"));
