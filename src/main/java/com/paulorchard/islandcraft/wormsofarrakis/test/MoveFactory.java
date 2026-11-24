@@ -1,5 +1,6 @@
 package com.paulorchard.islandcraft.wormsofarrakis.test;
 
+import com.paulorchard.islandcraft.wormsofarrakis.fx.FxOptions;
 import com.paulorchard.islandcraft.wormsofarrakis.path.HeadSpec;
 import com.paulorchard.islandcraft.wormsofarrakis.path.MouthAnim;
 import com.paulorchard.islandcraft.wormsofarrakis.path.Moves;
@@ -62,7 +63,7 @@ public final class MoveFactory {
         p[8] = mode;
         boolean dflt = closeTime == MouthAnim.DEFAULT_CLOSE_TIME && closeEnd == MouthAnim.CLOSE_END_DEFAULT_MARK && openDeg == HeadSpec.OPEN_DEGREES && teeth;
         if (dflt) return new WormSpec(base.kind(), base.mode(), p);
-        p = java.util.Arrays.copyOf(p, 26);
+        p = java.util.Arrays.copyOf(p, Math.max(26, p.length));   // never shorter: the fx fields (p26..p30) may follow
         if (base.p().length <= 17) p[17] = -1;
         if (base.p().length <= 18) p[18] = -1;
         if (base.p().length <= 19) p[19] = 1;
@@ -76,7 +77,14 @@ public final class MoveFactory {
 
     /** The mouth pose command: holds the closing at a fraction (0 = open at open_deg, 1 = closed), or releases it (fraction < 0). */
     public static WormSpec withMouthPose(WormSpec s, double fraction) {
-        double[] p = java.util.Arrays.copyOf(s.p(), 26);
+        double[] p = java.util.Arrays.copyOf(s.p(), Math.max(26, s.p().length));
+        fillMouthDefaults(s, p);
+        p[25] = fraction;
+        return new WormSpec(s.kind(), s.mode(), p);
+    }
+
+    /** Puts the defaults into the p17..p25 slots that a shorter (older) spec did not have. */
+    private static void fillMouthDefaults(WormSpec s, double[] p) {
         if (s.p().length <= 17) p[17] = -1;
         if (s.p().length <= 18) p[18] = -1;
         if (s.p().length <= 19) p[19] = 1;
@@ -84,9 +92,33 @@ public final class MoveFactory {
         if (s.p().length <= 22) p[22] = MouthAnim.CLOSE_END_DEFAULT_MARK;
         if (s.p().length <= 23) p[23] = HeadSpec.OPEN_DEGREES;
         if (s.p().length <= 24) p[24] = 1;
-        p[25] = fraction;
-        return new WormSpec(s.kind(), s.mode(), p);
+        if (s.p().length <= 25) p[25] = -1;
     }
+
+    /**
+     * Prompt 09: the effect keys on top of a spec: p26 fx (1/0), p27 fxsound, p28 fxparticles, p29 fxvol, p30 fxcount. A spec whose fx keys are all
+     * at the defaults of its move (fx on for crash, emerge, engulf, off for crest) keeps its shorter older length.
+     */
+    public static WormSpec withFx(WormSpec base, FxOptions o) {
+        if (o.isDefault(FxOptions.defaultOn(base.mode()))) return base;
+        double[] p = java.util.Arrays.copyOf(base.p(), Math.max(31, base.p().length));
+        fillMouthDefaults(base, p);
+        p[26] = o.on() ? 1 : 0;
+        p[27] = o.sound() ? 1 : 0;
+        p[28] = o.particles() ? 1 : 0;
+        p[29] = o.vol();
+        p[30] = o.count();
+        return new WormSpec(base.kind(), base.mode(), p);
+    }
+
+    /** The effect options of a spec (defaults when the spec is short). */
+    public static FxOptions fxOptions(WormSpec s) {
+        return new FxOptions(s.p(26, FxOptions.defaultOn(s.mode()) ? 1 : 0) > 0, s.p(27, 1) > 0, s.p(28, 1) > 0, s.p(29, 1), s.p(30, 1));
+    }
+
+    /** The mouth closing numbers of a spec (for the anchors): close_time and close_end. */
+    public static double closeTime(WormSpec s) { return s.p(21, MouthAnim.DEFAULT_CLOSE_TIME); }
+    public static double closeEnd(WormSpec s) { return s.p(22, MouthAnim.CLOSE_END_DEFAULT_MARK); }
 
     /** The mouth opening angle in degrees at script time tau: held pose, static open/closed, or the closing animation. */
     public static double mouthAngle(WormSpec s, double tau) {
@@ -135,8 +167,10 @@ public final class MoveFactory {
 
     /** Move for a spec, cached by everything except the time fields. */
     public static synchronized Moves.Move get(WormSpec s) {
-        double[] q = s.p().clone();
-        for (int i : new int[]{8, 11, 12, 13, 16, 17, 21, 22, 23, 24, 25}) if (i < q.length) q[i] = 0;   // time and mouth fields do not change the path
+        // the key is the path part of the spec (p0..p20 with the defaults filled in); the time, mouth and fx fields (p21 up) never change the path
+        double[] q = new double[21];
+        for (int i = 0; i < 21; i++) q[i] = s.p(i, i == 18 ? -1 : i == 19 ? 1 : 0);
+        for (int i : new int[]{8, 11, 12, 13, 16, 17}) q[i] = 0;
         String key = new WormSpec(s.kind(), s.mode(), q).serialize();
         Moves.Move m = CACHE.get(key);
         if (m == null) {

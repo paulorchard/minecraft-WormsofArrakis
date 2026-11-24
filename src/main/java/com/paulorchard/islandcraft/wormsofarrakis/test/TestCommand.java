@@ -9,6 +9,10 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.paulorchard.islandcraft.wormsofarrakis.WormsOfArrakis;
+import com.paulorchard.islandcraft.wormsofarrakis.fx.CrashFx;
+import com.paulorchard.islandcraft.wormsofarrakis.fx.FxAnchors;
+import com.paulorchard.islandcraft.wormsofarrakis.fx.FxOptions;
+import com.paulorchard.islandcraft.wormsofarrakis.fx.FxPlayer;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.BendLimit;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.ScaleMath;
 import com.paulorchard.islandcraft.wormsofarrakis.path.FallFamily;
@@ -176,6 +180,11 @@ final class TestCommand {
         root.then(Commands.literal("freeze").then(Commands.argument("t", StringArgumentType.word()).executes(TestCommand::freezeCmd)));
         // prompt 08: hold the mouth at a fraction of its closing (0 = fully open at open_deg, 1 = fully closed), or release it
         root.then(Commands.literal("mouthpose").then(Commands.argument("value", StringArgumentType.word()).executes(TestCommand::mouthPoseCmd)));
+        // prompt 09: the crash effects sheet: fx (anchors and sheet of the running move), fx solo <group|off>, fx particles on|off, fx sound on|off
+        root.then(Commands.literal("fx").executes(TestCommand::fxCmd)
+                .then(Commands.literal("solo").then(Commands.argument("group", StringArgumentType.word()).executes(TestCommand::fxSoloCmd)))
+                .then(Commands.literal("particles").then(Commands.argument("state", StringArgumentType.word()).executes(ctx -> fxSwitchCmd(ctx, true))))
+                .then(Commands.literal("sound").then(Commands.argument("state", StringArgumentType.word()).executes(ctx -> fxSwitchCmd(ctx, false)))));
         root.then(branch("mouth", 2, List.of(w("width"), new Arg("action", StringArgumentType.word()))));
         root.then(Commands.literal("clear").executes(ctx -> {
             int n = 0;
@@ -298,6 +307,69 @@ final class TestCommand {
         return changed;
     }
 
+    /** Looks every sound event and particle type of the sheet up in the game's registries (server-safe) and says what it found. */
+    static String fxRegistryLine() {
+        int soundOk = 0, partOk = 0;
+        StringBuilder missing = new StringBuilder();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (CrashFx.Cue c : CrashFx.CUES) {
+            if (!seen.add(c.event())) continue;
+            if (net.minecraft.core.registries.BuiltInRegistries.SOUND_EVENT.getValue(net.minecraft.resources.Identifier.withDefaultNamespace(c.event())) != null) soundOk++;
+            else missing.append(" sound ").append(c.event());
+        }
+        int sounds = seen.size();
+        java.util.Set<String> types = new java.util.HashSet<>();
+        for (CrashFx.Emitter e : CrashFx.EMITTERS) {
+            if (!types.add(e.type().id)) continue;
+            if (net.minecraft.core.registries.BuiltInRegistries.PARTICLE_TYPE.getValue(net.minecraft.resources.Identifier.withDefaultNamespace(e.type().id)) != null) partOk++;
+            else missing.append(" particle ").append(e.type().id);
+        }
+        return String.format(Locale.ROOT, "fx registry check: %d/%d sound events and %d/%d particle types of the sheet found%s", soundOk, sounds, partOk, types.size(), missing.length() == 0 ? "" : ", MISSING:" + missing);
+    }
+
+    /** fx: the anchors of the first moving worm and the sheet (chat: one line per group and per particle row; the log has every row with its times). */
+    private static int fxCmd(CommandContext<CommandSourceStack> ctx) {
+        for (net.minecraft.world.entity.Entity e : ctx.getSource().getLevel().getAllEntities()) {
+            if (!(e instanceof TestWormEntity w) || !w.getSpecString().startsWith("move;")) continue;
+            WormSpec s = WormSpec.parse(w.getSpecString());
+            Moves.Move m = MoveFactory.get(s);
+            FxOptions o = MoveFactory.fxOptions(s);
+            FxAnchors.Anchors a = FxAnchors.of(m, MoveFactory.closeTime(s), MoveFactory.closeEnd(s));
+            notice(ctx, FxPlayer.headerLine(m.label(), m.width, o, m.r0, FxFlags.sound, FxFlags.particles, FxFlags.solo));
+            notice(ctx, "anchors (s): " + a.line());
+            for (String line : FxPlayer.chatLines(a)) ctx.getSource().sendSuccess(() -> Component.literal(line), false);
+            notice(ctx, fxRegistryLine());
+            for (String line : FxPlayer.sheetLines(a)) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] fx sheet: {}", line);
+            return 1;
+        }
+        return fail(ctx, "fx: no moving worm to read the anchors from (spawn one first, for example crash 16 120)");
+    }
+
+    /** fx solo <group|off>: only that sound group plays (for tuning). */
+    private static int fxSoloCmd(CommandContext<CommandSourceStack> ctx) {
+        String v = StringArgumentType.getString(ctx, "group");
+        if (v.equals("off")) {
+            FxFlags.solo = null;
+            notice(ctx, "fx solo off: every sound group plays");
+            return 1;
+        }
+        CrashFx.Group g = CrashFx.Group.byLabel(v);
+        if (g == null) return fail(ctx, "fx solo <group>: group must be tremor, breach, stream, roar, mouth, slide or fall (or off), not " + v);
+        FxFlags.solo = g;
+        notice(ctx, "fx solo " + g.label() + ": only the " + g.label() + " sounds play (particles are not affected); fx solo off returns to all");
+        return 1;
+    }
+
+    /** fx particles on|off, fx sound on|off. */
+    private static int fxSwitchCmd(CommandContext<CommandSourceStack> ctx, boolean particles) {
+        String v = StringArgumentType.getString(ctx, "state");
+        if (!v.equals("on") && !v.equals("off")) return fail(ctx, "fx " + (particles ? "particles" : "sound") + " <on|off>, not " + v);
+        boolean on = v.equals("on");
+        if (particles) FxFlags.particles = on; else FxFlags.sound = on;
+        notice(ctx, "fx " + (particles ? "particles " : "sound ") + v + (on ? "" : ": cues and emission that have not started are skipped; fx " + (particles ? "particles" : "sound") + " on plays the next ones"));
+        return 1;
+    }
+
     /** True when the command carries the word force in any of its free-text arguments. */
     private static boolean hasForce(CommandContext<CommandSourceStack> ctx) {
         for (String name : new String[]{"force", "plane", "liner", "closer"}) {
@@ -383,6 +455,16 @@ final class TestCommand {
                     MoveFactory.teethOn(s) ? "on" : "off");
         } else {
             WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} mouth: static {} teeth={}", m.label(), (int) s.p(8, 0) == MoveFactory.MOUTH_OPEN ? "open " + trim(s.p(23, HeadSpec.OPEN_DEGREES)) + " deg" : "closed", MoveFactory.teethOn(s) ? "on" : "off");
+        }
+        FxOptions fo = MoveFactory.fxOptions(s);
+        if (fo.on()) {
+            FxAnchors.Anchors an = FxAnchors.of(m, MoveFactory.closeTime(s), MoveFactory.closeEnd(s));
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} fx: on sound={} particles={} fxvol={} fxcount={} count scale={} (r0={}, min(r0/8, {})) sound plays={} anchors: {}", m.label(), fo.sound() ? "on" : "off", fo.particles() ? "on" : "off",
+                    trim(fo.vol()), trim(fo.count()), String.format(Locale.ROOT, "%.2f", fo.countScale(m.r0)), String.format(Locale.ROOT, "%.2f", m.r0), CrashFx.MAX_AUTO_SCALE,
+                    FxPlayer.expand(an, fo, 0).size(), an.line());
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {}", fxRegistryLine());
+        } else {
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} fx: off", m.label());
         }
         int frames = m.fam != null || m.kind.equals("engulf") ? 4 : 3;
         for (int i = 0; i <= frames; i++) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} {}", m.kind, m.frame(i / (double) frames).line());

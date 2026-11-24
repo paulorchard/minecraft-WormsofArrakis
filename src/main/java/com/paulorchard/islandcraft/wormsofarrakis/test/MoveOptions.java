@@ -1,5 +1,7 @@
 package com.paulorchard.islandcraft.wormsofarrakis.test;
 
+import com.paulorchard.islandcraft.wormsofarrakis.fx.CrashFx;
+import com.paulorchard.islandcraft.wormsofarrakis.fx.FxOptions;
 import com.paulorchard.islandcraft.wormsofarrakis.path.HeadSpec;
 import com.paulorchard.islandcraft.wormsofarrakis.path.Moves;
 
@@ -67,7 +69,12 @@ public final class MoveOptions {
                 num("close_end", closeEndDefault, -com.paulorchard.islandcraft.wormsofarrakis.path.MouthAnim.MAX_CLOSE_END, com.paulorchard.islandcraft.wormsofarrakis.path.MouthAnim.MAX_CLOSE_END, true, "-30..30",
                         kind.equals("crest") ? "seconds after the highest point of the head tip at which the closing ends" : "seconds after the start of the hold at which the closing ends"),
                 num("open_deg", HeadSpec.OPEN_DEGREES, 0, HeadSpec.OPEN_DEGREES, true, "0..45", "the start (open) angle in degrees"),
-                new Key("teeth", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the bristles on the mandibles and the throat"));
+                new Key("teeth", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the bristles on the mandibles and the throat"),
+                new Key("fx", Type.ONOFF, kind.equals("crest") ? 0 : 1, 0, 1, false, kind.equals("crest") ? "off" : "on", "on|off", "the crash sounds and particles of the sheet (prompt 09)" + (kind.equals("crest") ? "; on a crest only the rows anchored at approach, breach and reentry play" : "")),
+                new Key("fxsound", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the sounds of the sheet"),
+                new Key("fxparticles", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the particles of the sheet"),
+                num("fxvol", 1, 0, CrashFx.MAX_FXVOL, true, "0..2", "multiplier on the volume of every sound cue (above 1 a sound is heard further, not louder)"),
+                num("fxcount", 1, 0, CrashFx.MAX_FXCOUNT, true, "0..3", "multiplier on the count of every particle row (the counts also scale with the body width)"));
     }
 
     private static List<Key> join(List<Key> a, List<Key> b) {
@@ -89,7 +96,7 @@ public final class MoveOptions {
                 num("hold", Moves.DEFAULT_EMERGE_HOLD, 0, 120, true, "0..120", "seconds still at the top"),
                 speed(),
                 new Key("retreat_speed", Type.NUM, Double.NaN, 0.5, Moves.MAX_SPEED, true, "=speed", "0.5..64", "blocks per second of the way back"),
-                tail(Moves.EMERGE_PAUSE, "emerge").get(0)), tail(Moves.EMERGE_PAUSE, "emerge").subList(1, 7)));
+                tail(Moves.EMERGE_PAUSE, "emerge").get(0)), tail(Moves.EMERGE_PAUSE, "emerge").subList(1, tail(Moves.EMERGE_PAUSE, "emerge").size())));
         KEYS.put("crash", join(List.of(
                 numText("height", Moves.DEFAULT_HEIGHT, t(Moves.DEFAULT_HEIGHT), t(Moves.MIN_FALL_HEIGHT) + ".." + t(Moves.MAX_FALL_HEIGHT) + ", force lifts", "body widths of the head tip at the hold"),
                 numText("lean", Moves.DEFAULT_LEAN, t(Moves.DEFAULT_LEAN), "0..45", "degrees off vertical (the rise is at 90 - lean)"),
@@ -250,6 +257,11 @@ public final class MoveOptions {
             default -> throw new Bad("unknown move " + move);
         }
         spec = MoveFactory.withMouth(spec, mouthMode, v.get("close_time"), closeEndArg, v.get("open_deg"), teeth);
+        boolean fxOn = givenText.containsKey("fx") ? givenText.get("fx").equals("on") : FxOptions.defaultOn(spec.mode());
+        FxOptions fx = new FxOptions(fxOn, !"off".equals(givenText.get("fxsound")), !"off".equals(givenText.get("fxparticles")), v.get("fxvol"), v.get("fxcount"));
+        if (fxOn && move.equals("crest") && givenText.containsKey("fx"))
+            notes.add("fx=on on a crest: only the rows anchored at approach, breach and reentry play (a crest has no end of the rise and no fall start)");
+        spec = MoveFactory.withFx(spec, fx);
         return new Parsed(spec, force, mouthOpen, loop, notes, v);
     }
 }
