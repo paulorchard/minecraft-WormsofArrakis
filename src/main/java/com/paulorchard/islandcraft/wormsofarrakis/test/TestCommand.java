@@ -185,6 +185,15 @@ final class TestCommand {
                 .then(Commands.literal("solo").then(Commands.argument("group", StringArgumentType.word()).executes(TestCommand::fxSoloCmd)))
                 .then(Commands.literal("particles").then(Commands.argument("state", StringArgumentType.word()).executes(ctx -> fxSwitchCmd(ctx, true))))
                 .then(Commands.literal("sound").then(Commands.argument("state", StringArgumentType.word()).executes(ctx -> fxSwitchCmd(ctx, false)))));
+        // prompt 10 part 3: the light listener: light (the current sample and verdict), light dump, light log on|off|all, light force full|auto|<sky> <block>
+        root.then(Commands.literal("light").executes(TestCommand::lightCmd)
+                .then(Commands.literal("dump").executes(TestCommand::lightDumpCmd))
+                .then(Commands.literal("log").then(Commands.argument("mode", StringArgumentType.word()).executes(TestCommand::lightLogCmd)))
+                .then(Commands.literal("force")
+                        .then(Commands.literal("full").executes(ctx -> lightForce(ctx, 15, 15, "full")))
+                        .then(Commands.literal("auto").executes(ctx -> lightForce(ctx, -1, -1, "auto")))
+                        .then(Commands.argument("sky", IntegerArgumentType.integer()).then(Commands.argument("block", IntegerArgumentType.integer())
+                                .executes(ctx -> lightForce(ctx, IntegerArgumentType.getInteger(ctx, "sky"), IntegerArgumentType.getInteger(ctx, "block"), null))))));
         root.then(branch("mouth", 2, List.of(w("width"), new Arg("action", StringArgumentType.word()))));
         root.then(Commands.literal("clear").executes(ctx -> {
             int n = 0;
@@ -363,6 +372,55 @@ final class TestCommand {
         return 1;
     }
 
+    private static final String LIGHT_NO_CLIENT = "light: no sample (the light is read on the client: spawn a move in single player and look at it; a dedicated server has no client data)";
+
+    /** light: the current sample of every worm with the verdict (the same numbers as the log line). */
+    private static int lightCmd(CommandContext<CommandSourceStack> ctx) {
+        var r = LightFlags.reporter;
+        List<String> lines = r == null ? List.of() : r.get();
+        if (lines.isEmpty()) return fail(ctx, LIGHT_NO_CLIENT);
+        for (String l : lines) {
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {}", l);
+            ctx.getSource().sendSuccess(() -> Component.literal(l), false);
+        }
+        return 1;
+    }
+
+    /** light dump: the last 200 samples of every worm to the log. */
+    private static int lightDumpCmd(CommandContext<CommandSourceStack> ctx) {
+        var d = LightFlags.dumper;
+        int n = d == null ? 0 : d.getAsInt();
+        if (n == 0) return fail(ctx, LIGHT_NO_CLIENT);
+        notice(ctx, "light dump: " + n + " samples written to the log as INFO lines (grep 'light dump' in logs\\latest.log)");
+        return 1;
+    }
+
+    /** light log on|off|all. */
+    private static int lightLogCmd(CommandContext<CommandSourceStack> ctx) {
+        String v = StringArgumentType.getString(ctx, "mode");
+        var m = com.paulorchard.islandcraft.wormsofarrakis.light.LightWatch.LogMode.byLabel(v);
+        if (m == null) return fail(ctx, "light log <on|off|all>: on = changes and warnings only (default), off = nothing, all = every sample; not " + v);
+        LightFlags.log = m;
+        notice(ctx, "light log " + m.label() + (m == com.paulorchard.islandcraft.wormsofarrakis.light.LightWatch.LogMode.ALL ? ": every sample is logged (for tuning; the log grows fast)" : m == com.paulorchard.islandcraft.wormsofarrakis.light.LightWatch.LogMode.OFF ? ": the light listener is silent" : ": a line when the light changes and a WARN when a worm would be dark"));
+        return 1;
+    }
+
+    /** light force full|auto|sky block: the packed light the renderer uses for every worm (an A/B test); auto returns to the mode of each move. */
+    private static int lightForce(CommandContext<CommandSourceStack> ctx, int sky, int block, String label) {
+        if (label != null && label.equals("auto")) {
+            LightFlags.forced = -1;
+            LightFlags.forcedLabel = "auto";
+            notice(ctx, "light force auto: every worm uses the light of its own mode (light=probe by default)");
+            return 1;
+        }
+        int s = Math.max(0, Math.min(15, sky)), b = Math.max(0, Math.min(15, block));
+        if (s != sky || b != block) notice(ctx, "light force: sky and block are 0..15; clamped to sky " + s + " block " + b);
+        LightFlags.forced = com.paulorchard.islandcraft.wormsofarrakis.light.LightMath.pack(b, s);
+        LightFlags.forcedLabel = label != null ? label : "sky " + s + " block " + b;
+        notice(ctx, "light force " + LightFlags.forcedLabel + ": every worm is drawn with block " + b + " sky " + s + " until light force auto (the log says so once a second)");
+        return 1;
+    }
+
     /** fx particles on|off, fx sound on|off. */
     private static int fxSwitchCmd(CommandContext<CommandSourceStack> ctx, boolean particles) {
         String v = StringArgumentType.getString(ctx, "state");
@@ -469,6 +527,9 @@ final class TestCommand {
         } else {
             WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} fx: off", m.label());
         }
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} light: mode={} (probe = the maximum of block and sky light at up to {} points along the exposed body, recomputed every {} ticks, moving at most {} level per tick; vanilla = the light at the entity origin; full = 15/15)",
+                m.label(), MoveFactory.lightMode(s).label(), com.paulorchard.islandcraft.wormsofarrakis.light.LightMath.LIGHT_SAMPLES, com.paulorchard.islandcraft.wormsofarrakis.light.LightMath.SAMPLE_EVERY,
+                com.paulorchard.islandcraft.wormsofarrakis.light.LightMath.MAX_STEP);
         int frames = m.fam != null || m.kind.equals("engulf") ? 4 : 3;
         for (int i = 0; i <= frames; i++) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} {}", m.kind, m.frame(i / (double) frames).line());
     }

@@ -30,7 +30,7 @@ public final class MoveOptions {
         public Bad(String message) { super(message); }
     }
 
-    public enum Type { NUM, ONOFF, MOUTH }
+    public enum Type { NUM, ONOFF, MOUTH, LIGHT }
 
     /**
      * One variable of a move. {@code clamp}: a number outside min..max is pulled into the range with a note; otherwise min and max
@@ -72,6 +72,7 @@ public final class MoveOptions {
                 new Key("teeth", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the bristles on the mandibles and the throat"),
                 new Key("fx", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the sounds and particles of the sheet (prompts 09 and 10; on a crest the entry and the exit both play)"),
                 new Key("eruption", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the eruption rows of the breach: jets of sand, dust columns, flying sand blocks, the dust bank (prompt 10)"),
+                new Key("light", Type.LIGHT, 0, 0, 2, false, "probe", "probe|vanilla|full", "the light of the worm: probe = the best light along the exposed body (prompt 10); vanilla = the light at the entity origin only; full = 15/15"),
                 new Key("fxsound", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the sounds of the sheet"),
                 new Key("fxparticles", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the particles of the sheet"),
                 num("fxvol", 1, 0, CrashFx.MAX_FXVOL, true, "0..2", "multiplier on the volume of every sound cue (above 1 a sound is heard further, not louder)"),
@@ -204,6 +205,10 @@ public final class MoveOptions {
                     if (!val.equals("on") && !val.equals("off")) throw new Bad(name + " must be on or off, not " + val);
                     givenText.put(name, val);
                 }
+                case LIGHT -> {
+                    if (!val.equals("probe") && !val.equals("vanilla") && !val.equals("full")) throw new Bad("light must be probe, vanilla or full, not " + val);
+                    givenText.put(name, val);
+                }
                 case MOUTH -> {
                     if (!val.equals("open") && !val.equals("closed") && !val.equals("anim")) throw new Bad("mouth must be anim, open or closed, not " + val);
                     givenText.put(name, val);
@@ -261,6 +266,7 @@ public final class MoveOptions {
         boolean fxOn = givenText.containsKey("fx") ? givenText.get("fx").equals("on") : FxOptions.defaultOn(spec.mode());
         FxOptions fx = new FxOptions(fxOn, !"off".equals(givenText.get("fxsound")), !"off".equals(givenText.get("fxparticles")), v.get("fxvol"), v.get("fxcount"), !"off".equals(givenText.get("eruption")));
         spec = MoveFactory.withFx(spec, fx);
+        spec = MoveFactory.withLight(spec, givenText.getOrDefault("light", "probe"));
         return new Parsed(spec, force, mouthOpen, loop, notes, v);
     }
 }

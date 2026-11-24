@@ -77,7 +77,7 @@ public final class FxClient {
     /** The part of a spec that identifies the move for the effects: time, freeze, speed, held pose and the mouth's look do not. */
     private static String keyOf(WormSpec s) {
         double[] p = s.p().clone();
-        for (int i : new int[]{8, 11, 12, 13, 17, 23, 24, 25}) if (i < p.length) p[i] = 0;
+        for (int i : new int[]{8, 11, 12, 13, 17, 23, 24, 25, 32}) if (i < p.length) p[i] = 0;
         return new WormSpec(s.kind(), s.mode(), p).serialize();
     }
 

@@ -528,14 +528,14 @@ public final class FxPlayer {
         }
 
         /** Body rings (joints 1..) whose centre is above the base level + 0.5. */
-        static List<Integer> bodyRings(Snapshot g) {
+        public static List<Integer> bodyRings(Snapshot g) {
             List<Integer> l = new ArrayList<>();
             for (int k = 1; k < g.joints.length; k++) if (g.joints[k][1] > 0.5) l.add(k);
             return l;
         }
 
         /** Unit tangent {ty, tz} of the body at joint k. */
-        static double[] tangent(Snapshot g, int k) {
+        public static double[] tangent(Snapshot g, int k) {
             double[] a = g.joints[Math.max(0, k - 1)], b = g.joints[Math.min(g.joints.length - 1, k + 1)];
             double dy = b[1] - a[1], dz = b[2] - a[2], len = Math.hypot(dy, dz);
             return len < 1e-12 ? new double[]{1, 0} : new double[]{dy / len, dz / len};

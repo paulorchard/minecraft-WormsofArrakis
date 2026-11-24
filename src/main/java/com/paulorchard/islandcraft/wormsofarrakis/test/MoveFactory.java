@@ -112,6 +112,28 @@ public final class MoveFactory {
         return new WormSpec(base.kind(), base.mode(), p);
     }
 
+    /** Prompt 10: p32 light (0 probe, the default; 1 vanilla; 2 full). A spec with the default keeps its shorter length. */
+    public static WormSpec withLight(WormSpec base, String mode) {
+        int v = mode.equals("vanilla") ? 1 : mode.equals("full") ? 2 : 0;
+        if (v == 0) return base;
+        double[] p = java.util.Arrays.copyOf(base.p(), Math.max(33, base.p().length));
+        fillMouthDefaults(base, p);
+        if (base.p().length <= 26) p[26] = FxOptions.defaultOn(base.mode()) ? 1 : 0;
+        if (base.p().length <= 27) p[27] = 1;
+        if (base.p().length <= 28) p[28] = 1;
+        if (base.p().length <= 29) p[29] = 1;
+        if (base.p().length <= 30) p[30] = 1;
+        if (base.p().length <= 31) p[31] = 1;
+        p[32] = v;
+        return new WormSpec(base.kind(), base.mode(), p);
+    }
+
+    /** The light mode of a spec (default probe). */
+    public static com.paulorchard.islandcraft.wormsofarrakis.light.LightMath.Mode lightMode(WormSpec s) {
+        int v = (int) s.p(32, 0);
+        return v == 1 ? com.paulorchard.islandcraft.wormsofarrakis.light.LightMath.Mode.VANILLA : v == 2 ? com.paulorchard.islandcraft.wormsofarrakis.light.LightMath.Mode.FULL : com.paulorchard.islandcraft.wormsofarrakis.light.LightMath.Mode.PROBE;
+    }
+
     /** The effect options of a spec (defaults when the spec is short). */
     public static FxOptions fxOptions(WormSpec s) {
         return new FxOptions(s.p(26, FxOptions.defaultOn(s.mode()) ? 1 : 0) > 0, s.p(27, 1) > 0, s.p(28, 1) > 0, s.p(29, 1), s.p(30, 1), s.p(31, 1) > 0);

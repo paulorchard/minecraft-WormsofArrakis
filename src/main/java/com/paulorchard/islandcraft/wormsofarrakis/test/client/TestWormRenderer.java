@@ -103,6 +103,18 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
     }
 
     private static final Map<Integer, MoveCache> MOVE_CACHE = new HashMap<>();
+    private static final Map<Integer, Integer> BODY_BUILDS = new HashMap<>();
+    private static final Map<String, Integer> MESH_LAST = new HashMap<>();
+
+    /** Prompt 10 (H4): counts the quads of a built mesh with a zero or tiny normal, a collapsed area or a NaN, and logs one line when the count changes (silent while it is 0). */
+    private static void checkMesh(String part, int id, ShingleMath.Result r, String what) {
+        com.paulorchard.islandcraft.wormsofarrakis.light.QuadCheck.Count c = com.paulorchard.islandcraft.wormsofarrakis.light.QuadCheck.check(r.v, r.quads);
+        if (MESH_LAST.size() > 256) MESH_LAST.clear();
+        Integer prev = MESH_LAST.put(id + part, c.bad());
+        if (prev != null && prev == c.bad()) return;
+        String line = com.paulorchard.islandcraft.wormsofarrakis.light.QuadCheck.line(part, what, c);
+        if (line != null) WormsOfArrakis.LOGGER.warn(line);
+    }
     private static final Map<Integer, Boolean> HOLD_LOGGED = new HashMap<>();
     private static final Map<Integer, String> PHASE_LAST = new HashMap<>();
     private static final Map<Long, Double> COLUMN_CACHE = new HashMap<>();
@@ -169,6 +181,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
             c.heights = m.headHeights(s);
             if (MOVE_CACHE.size() > 64) MOVE_CACHE.clear();
             MOVE_CACHE.put(id, c);
+            if (BODY_BUILDS.merge(id, 1, Integer::sum) % 10 == 1) checkMesh("body", id, c.skin.result, m.label() + " W" + m.width + " n=" + n);   // prompt 10 (H4): every 10th rebuild is enough
             String sig = spec.mode() + n + "/" + m.segments + key;
             if (!sig.equals(LAST_MOVE_LOG)) {
                 LAST_MOVE_LOG = sig;
@@ -188,7 +201,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
             }
         } else HOLD_LOGGED.remove(id);
         final ShingleMath.Result res = c.skin.result;
-        int light = state.lightCoords;
+        int light = LightClient.lightFor(id, spec, state.lightCoords);
         poseStack.pushPose();
         poseStack.mulPose(Axis.YP.rotationDegrees(-state.getGeckolibData(YAW)));
         if (res.quads > 0) {
@@ -246,6 +259,8 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
             mc = new MouthCache();
             mc.key = key;
             mc.thr = HeadMouth.throat(m.width, n, R, delta0, teeth);   // fixed: built once
+            checkMesh("throat", pid, mc.thr.flat, "W" + m.width + " n=" + n);
+            checkMesh("teeth (throat)", pid, mc.thr.bristles, "W" + m.width + " n=" + n);
             MOUTH_CACHE.put(pid, mc);
         }
         int ak = MouthAnim.angleKey(mouthDeg);
@@ -254,6 +269,10 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
             mc.mand = HeadMouth.mandibles(m.width, n, R, delta0, HeadSpec.coneHeight(m.width), ak / 10.0, opt, teeth);
             mc.angleKey = ak;
             mc.builds++;
+            if (mc.builds % 5 == 1 || ak == 0) {
+                checkMesh("shell", pid, mc.mand.shell, "W" + m.width + " n=" + n + " angle=" + ak / 10.0);
+                checkMesh("teeth (mandibles)", pid, mc.mand.bristles, "W" + m.width + " n=" + n + " angle=" + ak / 10.0);
+            }
             String sig = key + "|" + ak;
             if (ak == 0 || !LAST_MOUTH_LOG.startsWith(key)) {
                 LAST_MOUTH_LOG = sig;
@@ -357,7 +376,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
         for (int k = 0; k < segs; k++) {
             skin[k] = Frustum.fromRings(n, chain.miterRing(k, false, n), chain.miterRing(k + 1, true, n));
         }
-        int light = state.lightCoords;
+        int light = LightClient.lightFor(-1, spec, state.lightCoords);
         poseStack.pushPose();
         poseStack.mulPose(Axis.YP.rotationDegrees(-state.getGeckolibData(YAW)));
         collector.submitCustomGeometry(poseStack, RenderTypes.entityCutoutCull(TestWormModel.TEXTURE), (pose, buffer) -> {
@@ -438,7 +457,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
         ShingleStats.frame(rebuild, buildNs, c.res, segs, n);
         final ShingleMath.Result res = c.res;
         final int linerColor = liner2 ? ShingleMath.LINER_DARK : ShingleMath.LINER_TINT;
-        int light = state.lightCoords;
+        int light = LightClient.lightFor(-1, spec, state.lightCoords);
         poseStack.pushPose();
         poseStack.mulPose(Axis.YP.rotationDegrees(-state.getGeckolibData(YAW)));
         collector.submitCustomGeometry(poseStack, RenderTypes.entityCutoutCull(TestWormModel.TEXTURE), (pose, buffer) -> {
