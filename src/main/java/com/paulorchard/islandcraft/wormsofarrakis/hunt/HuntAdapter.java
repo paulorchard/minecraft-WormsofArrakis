@@ -53,6 +53,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         if (instance != null) return;
         instance = new HuntAdapter();
         NeoForge.EVENT_BUS.register(instance);
+        SwallowGuard.init();
     }
 
     private static final double DT = 0.05;
@@ -77,13 +78,35 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
 
     private final StrikeRunner strikes = new StrikeRunner(this);
     private final HazardRunner hazard = new HazardRunner(this, strikes);
+    private final GroupRunner groups = new GroupRunner(this);
+    private final AreaPreview areaPreview = new AreaPreview(this);
+
+    /** The command hunt preview area: see {@link AreaPreview}. */
+    public List<String> previewArea(ServerPlayer p, SizeTable.Size size, String move) { return areaPreview.start(p, size, move); }
+
+    /** One line per move at the start of the server (prompt 17 part 2). */
+    private void logStrikeAreas() {
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike area: the largest ring or disc of the eruption rows is {} units of r0 ({}); radius = that x r0 + StrikeAreaMargin {} (a value above 0 in the toml replaces it)", fmt(StrikeArea.largestRingUnits()), StrikeArea.largestRingRow(), fmt(cfg.strikeAreaMargin));
+        for (StrikeType t : StrikeType.values()) {
+            StringBuilder b = new StringBuilder();
+            for (SizeTable.Size s : SizeTable.Size.values()) b.append(' ').append(s.label).append('=').append(fmt(strikeAreaRadius(t, s)));
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike area: {}{}", t.label, b);
+        }
+        StringBuilder b = new StringBuilder();
+        for (SizeTable.Size s : SizeTable.Size.values()) b.append(' ').append(s.label).append('=').append(fmt(maxStrikeArea(s)));
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike area: maximum (the group at the start of the freeze){}", b);
+    }
+    private boolean stopping;
     private volatile FreezeHook freezeHook = FreezeHook.LOGGING;
     private final Map<UUID, FreezeRun> freezes = new HashMap<>();
     private final List<ServerPlayer> extra = new ArrayList<>();
 
     /** Test only (the smoke start): a fake player standing at a place; it is hunted like a real one. Revived if it was killed before. */
-    public ServerPlayer fakePlayer(ServerLevel level, double x, double y, double z) {
-        net.neoforged.neoforge.common.util.FakePlayer fp = net.neoforged.neoforge.common.util.FakePlayerFactory.get(level, new com.mojang.authlib.GameProfile(UUID.nameUUIDFromBytes("WormFake".getBytes()), "WormFake"));
+    public ServerPlayer fakePlayer(ServerLevel level, double x, double y, double z) { return fakePlayer(level, "WormFake", x, y, z); }
+
+    /** Test only: several fake players with their own names stand in for a group (prompt 17); the first one made is the one the fake trigger hunts. */
+    public ServerPlayer fakePlayer(ServerLevel level, String name, double x, double y, double z) {
+        net.neoforged.neoforge.common.util.FakePlayer fp = net.neoforged.neoforge.common.util.FakePlayerFactory.get(level, new com.mojang.authlib.GameProfile(UUID.nameUUIDFromBytes(name.getBytes()), name));
         if (!fp.isAlive()) fp.revive();
         fp.setInvisible(false);
         fp.setPos(x, y, z);
@@ -194,6 +217,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         refreshConfig();
         logConfig();
         strikes.warmUp();
+        logStrikeAreas();
     }
 
     private boolean configLogged;
@@ -215,6 +239,8 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         mgr.tick(DT, this);
         tickFreezes();
         tickAttackRumbles();
+        groups.tick();
+        areaPreview.tick();
         playRoarShots();
         strikes.tick();
         hazard.purge();
@@ -227,6 +253,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         UUID id = e.getEntity().getUUID();
         boolean in = mgr.inEvent(id);
         mgr.logoff(id);
+        if (e.getEntity() instanceof ServerPlayer sp) groups.onLogout(sp);   // a swallowed player is killed at once: no dodging by logging out
         online.remove(id);
         if (in) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: {} logged off inside an event: removed from the list, aggro kept at 99 until they log in again", e.getEntity().getGameProfile().name());
     }
@@ -237,11 +264,26 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         if (e.getEntity() instanceof ServerPlayer sp) FreezeRun.clean(sp);   // belt and braces: a modifier left by a crash is removed (they are transient, so none is saved)
     }
 
+    /** A swallowed player who changes dimension is killed at once, a held one is released. */
+    @SubscribeEvent
+    public void onChangedDimension(PlayerEvent.PlayerChangedDimensionEvent e) {
+        if (e.getEntity() instanceof ServerPlayer sp) groups.onDimension(sp);
+    }
+
+    /** Prompt 17 part 0.4: when a strike worm stops being tracked by a player, say who, how far, and what their camera was (to find out why the worm vanished in the owner's test of prompt 16). */
+    @SubscribeEvent
+    public void onStopTracking(PlayerEvent.StopTracking e) {
+        if (!(e.getTarget() instanceof com.paulorchard.islandcraft.wormsofarrakis.test.TestWormEntity w) || !w.isStrikeWorm() || !(e.getEntity() instanceof ServerPlayer sp)) return;
+        var cam = com.paulorchard.islandcraft.wormsofarrakis.camera.DeathCamManager.instance().sessionOf(sp.getUUID());
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] tracking: worm {} no longer tracked by {} (distance {}, player alive {}, camera {})", w.getId(), sp.getGameProfile().name(), fmt(Math.sqrt(sp.distanceToSqr(w))), sp.isAlive(), cam == null ? "self" : "entity " + cam.entity.getId());
+    }
+
     @SubscribeEvent
     public void onDeath(LivingDeathEvent e) { if (e.getEntity() instanceof ServerPlayer sp) mgr.died(sp.getUUID()); }
 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent e) {
+        stopping = true;
         int n = mgr.stop(null);
         stopAllRumbles();
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: server stopping: {} event(s) stopped, every fake cell restored", n);
@@ -277,8 +319,8 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
 
     @Override
     public void onEnd(HuntEvent e, HuntEvent.EndReason reason) {
+        groups.finish(e, reason, stopping);   // survivors released, the swallowed killed (or released) now that the show is over
         strikes.onEnd(e, reason);
-        releaseFreeze(e);
         int restored = stopRumbles(e.id);
         com.paulorchard.islandcraft.wormsofarrakis.camera.DeathCamManager.instance().onEventEnd(e.id);
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: event {} ended {} (list scores set to 0; {} tremor rumble(s) stopped, their cells restored)", e.id, reason, restored);
@@ -306,12 +348,32 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {}", StrikeHook.attackLine(e, w, sizeName));
         ServerPlayer p = online.get(victim);
         if (p == null) return;
-        FreezeRun run = new FreezeRun(p, e);
-        freezes.put(victim, run);
+        groups.start(e, p);   // the victim and everybody on Dune Sand in the strike area: each is held and rumbled by the same code (holdMember)
+    }
+
+    /** One member of a group is held: the freeze of prompt 14 (a 4 s linear slowdown, the jump block, the dismount, the push-back) and the attack rumble round them. */
+    void holdMember(HuntEvent e, ServerPlayer p, double freezeSeconds) {
+        UUID id = p.getUUID();
+        FreezeRun old = freezes.remove(id);
+        if (old != null) old.freeze.release();
+        FreezeRun run = new FreezeRun(p, e, freezeSeconds);
+        freezes.put(id, run);
         run.freeze.tick(0);   // nothing moves yet, but the jump block applies from this very tick
-        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: freeze start victim={} for {} s (speed cut linearly to zero, jumping blocked, held on the spot); nothing else of the world is changed", p.getGameProfile().name(), trim(e.attackSeconds));
-        freezeHook.onFreezeStart(victim, e);
-        startAttackRumble(e, p);
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: freeze start victim={} for {} s (speed cut linearly to zero, jumping blocked, held on the spot); nothing else of the world is changed", p.getGameProfile().name(), trim(freezeSeconds));
+        freezeHook.onFreezeStart(id, e);
+        if (freezeSeconds > 0) startAttackRumble(e, p);
+    }
+
+    /** One member is let go: their freeze (modifiers removed) and their rumble end; nothing else is touched. */
+    void releaseMember(UUID id, HuntEvent e) {
+        FreezeRun r = freezes.remove(id);
+        stopAttackRumbleOf(id, "the player is released or gone");
+        if (r == null) return;
+        r.freeze.release();
+        ServerPlayer p = online.get(id);
+        FreezeRun.clean(r.player);
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: freeze end victim={} (modifiers removed)", p == null ? r.player.getGameProfile().name() : p.getGameProfile().name());
+        freezeHook.onFreezeEnd(id, e);
     }
 
     private void tickFreezes() {
@@ -322,17 +384,34 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         }
     }
 
-    private void releaseFreeze(HuntEvent e) {
-        if (e.victim() == null) return;
-        FreezeRun r = freezes.remove(e.victim());
-        if (r == null) return;
-        r.freeze.release();
-        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: freeze end victim={} (modifiers removed)", e.victimName());
-        freezeHook.onFreezeEnd(e.victim(), e);
+    /** Every player that can take part (the server's and the test fake players). */
+    List<ServerPlayer> allPlayers() {
+        List<ServerPlayer> l = new ArrayList<>();
+        if (server != null) l.addAll(server.getPlayerList().getPlayers());
+        for (ServerPlayer p : extra) if (!l.contains(p)) l.add(p);
+        return l;
     }
 
-    /** The freeze of the event's victim ends now (the devour: they are dead, nothing of it stays). */
-    void releaseFreezeOf(HuntEvent e) { releaseFreeze(e); }
+    /** Prompt 17 part 1: is this being standing on Dune Sand (the worm's ground) now? A placed block under the feet is not sand; in the air up to 1.5 blocks of air above sand count. */
+    boolean onSandNow(net.minecraft.world.entity.LivingEntity e) {
+        if (!(e.level() instanceof ServerLevel level)) return false;
+        int bx = (int) Math.floor(e.getX()), bz = (int) Math.floor(e.getZ());
+        return EntitySand.onSand(e.onGround(), e.getY(), cfg.sandTolerance, y -> classOf(level, bx, y, bz));
+    }
+
+    /** The strike area radius of a move and size (prompt 17 part 2). */
+    double strikeAreaRadius(StrikeType t, SizeTable.Size s) {
+        return StrikeArea.radius(strikes.plan(t, s).r0(), cfg.strikeAreaRadius[t.ordinal()][s.ordinal()], cfg.strikeAreaMargin);
+    }
+
+    /** The largest strike area of the four moves of a size: the group at the start of the freeze. */
+    double maxStrikeArea(SizeTable.Size s) {
+        double m = 0;
+        for (StrikeType t : StrikeType.values()) m = Math.max(m, strikeAreaRadius(t, s));
+        return m;
+    }
+
+    GroupRunner groups() { return groups; }
 
     boolean isSand(BlockState st) { return sandSet.contains(st.getBlock()); }
     /** The set SandBlocks of the config (prompt 13): Dune Sand, sand, red sand. */
@@ -364,11 +443,11 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         boolean anchored;
         int lastLogged = -1;
 
-        FreezeRun(ServerPlayer p, HuntEvent e) {
+        FreezeRun(ServerPlayer p, HuntEvent e, double seconds) {
             this.victim = p.getUUID();
             this.event = e;
             this.player = p;
-            this.freeze = new Freeze(e.attackSeconds, this);
+            this.freeze = new Freeze(seconds, this);
         }
 
         static void clean(ServerPlayer p) {
@@ -536,8 +615,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
     private final Map<Long, List<com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Handle>> rumbles = new HashMap<>();
 
     private int stopRumbles(long eventId) {
-        AttackRun ar = attackRuns.get(eventId);
-        if (ar != null) stopAttackRun(ar, "the event ended or the server is stopping");
+        for (AttackRun ar : new ArrayList<>(attackRuns.values())) if (ar.event != null && ar.event.id == eventId) stopAttackRun(ar, "the event ended or the server is stopping");
         List<com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Handle> l = rumbles.remove(eventId);
         int n = 0;
         if (l != null) for (var h : l) if (h.running()) { h.stop(); n++; }
@@ -566,23 +644,25 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         return h;
     }
 
-    // ---- the attack rumble (prompt 16 part 1): one long rumble round the victim from the start of the freeze until the death ----
+    // ---- the attack rumble (prompt 16 part 1, prompt 17 parts 0.1 and 4): one long rumble round every held player, following them while they slow, pinned once they are held ----
 
-    /** One running attack rumble: of an event (until the death or the end), or a preview (until its seconds are over). */
+    /** One running attack rumble: of a member of an event (until they are released, swallowed-and-killed or the event ends), or a preview (until its seconds are over). */
     private static final class AttackRun {
         final long key;
         final HuntEvent event;   // null for a preview
-        final UUID victim;
+        final UUID victim;       // the player the rumble is round (a member of the group)
         final ServerLevel level;
-        final com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Handle handle;
+        com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Handle handle;
         final AttackRumble.Plan plan;
         final AttackRumble.FxClock fx;
         final Tremor.Plan fxPlan;
+        final RumbleFollow follow;   // null for a preview
+        final List<Retired> retired = new ArrayList<>();
         double t, viewerT;
         int viewerChanges;
         double previewSeconds;
 
-        AttackRun(long key, HuntEvent event, UUID victim, ServerLevel level, com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Handle handle, AttackRumble.Plan plan, long seed, Tremor.Plan fxPlan) {
+        AttackRun(long key, HuntEvent event, UUID victim, ServerLevel level, com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Handle handle, AttackRumble.Plan plan, long seed, Tremor.Plan fxPlan, RumbleFollow follow) {
             this.key = key;
             this.event = event;
             this.victim = victim;
@@ -591,20 +671,31 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
             this.plan = plan;
             this.fx = new AttackRumble.FxClock(seed);
             this.fxPlan = fxPlan;
+            this.follow = follow;
         }
     }
 
-    private final Map<Long, AttackRun> attackRuns = new HashMap<>();
-    private long previewSeq = -1;
+    /** A rumble that has been replaced by one at a new centre and is stopped after a short overlap (so the sand never flickers back to real for a moment). */
+    private record Retired(com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Handle handle, double stopAt) {}
 
-    /** The players who see the rumble round a victim: the victim and everybody within TremorViewDistance of them, in the same dimension. */
-    private List<ServerPlayer> viewersOf(ServerPlayer p) {
+    /** How long the old rumble stays after the new one has started (seconds): one pulse period of the prompt 15 rumble. */
+    private static final double FOLLOW_OVERLAP = 0.25;
+
+    private final Map<Long, AttackRun> attackRuns = new HashMap<>();
+    private long attackSeq = 1;
+    private long previewSeq = -1;
+    public int attackRecentred;
+
+    /** The players who see the rumble round a player: they themselves and everybody within TremorViewDistance of the centre, in the same dimension. */
+    private List<ServerPlayer> viewersOf(ServerPlayer p) { return viewersAt(p, p.getX(), p.getZ()); }
+
+    private List<ServerPlayer> viewersAt(ServerPlayer p, double x, double z) {
         List<ServerPlayer> viewers = new ArrayList<>();
         viewers.add(p);
         double vd2 = cfg.tremorViewDistance * cfg.tremorViewDistance;
         ServerLevel level = p.level();
-        for (ServerPlayer v : level.players()) if (v != p && v.distanceToSqr(p.getX(), v.getY(), p.getZ()) <= vd2) viewers.add(v);
-        for (ServerPlayer v : extra) if (v != p && v.level() == level && !viewers.contains(v) && v.distanceToSqr(p.getX(), v.getY(), p.getZ()) <= vd2) viewers.add(v);
+        for (ServerPlayer v : level.players()) if (v != p && v.distanceToSqr(x, v.getY(), z) <= vd2) viewers.add(v);
+        for (ServerPlayer v : extra) if (v != p && v.level() == level && !viewers.contains(v) && v.distanceToSqr(x, v.getY(), z) <= vd2) viewers.add(v);
         return viewers;
     }
 
@@ -614,16 +705,17 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         return m;
     }
 
+    /** The rumble round one member of an event, from the start of the freeze. Each member has their own, seeded apart so the sound and particles do not beat together. */
     private void startAttackRumble(HuntEvent e, ServerPlayer p) {
         AttackRumble.Plan plan = AttackRumble.plan(e.factor, cfg, longestPlay(e.size));
-        long seed = e.id * 0x9E3779B97F4A7C15L ^ 0xA77ACCL;
+        long seed = e.id * 0x9E3779B97F4A7C15L ^ 0xA77ACCL ^ (p.getUUID().getLeastSignificantBits() * 31);
         var params = com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Params.of(plan.radius(), plan.seconds()).withMax(plan.maxSixteenths()).withSeed(seed)
                 .withStrength(plan.asFraction()).withShare(Tremor::share);
         var h = com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.play(p.level(), p.getX(), p.getZ(), params, viewersOf(p));
-        AttackRun r = new AttackRun(e.id, e, p.getUUID(), p.level(), h, plan, seed ^ 0x5EED, Tremor.plan(1.0, e.factor, cfg));
-        attackRuns.put(e.id, r);
-        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: attack rumble start victim={} radius {} blocks max {}/16 strength {} -> 1.0 over {} s then 1.0 until the death (limit {} s), {} columns drawn, viewers within {} blocks re-chosen every {} s",
-                p.getGameProfile().name(), fmt(plan.radius()), plan.maxSixteenths(), fmt(plan.start()), trim(plan.freezeSeconds()), fmt(plan.seconds()), h.columns(), trim(cfg.tremorViewDistance), trim(AttackRumble.VIEWER_PERIOD));
+        AttackRun r = new AttackRun(attackSeq++, e, p.getUUID(), p.level(), h, plan, seed ^ 0x5EED, Tremor.plan(1.0, e.factor, cfg), new RumbleFollow(cfg.attackRumbleFollowSeconds, p.getX(), p.getZ()));
+        attackRuns.put(r.key, r);
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: attack rumble start victim={} radius {} blocks max {}/16 strength {} -> 1.0 over {} s then 1.0 until the end (limit {} s), {} columns drawn, viewers within {} blocks re-chosen every {} s; it follows the player every {} s while they slow and is pinned where they are held",
+                p.getGameProfile().name(), fmt(plan.radius()), plan.maxSixteenths(), fmt(plan.start()), trim(plan.freezeSeconds()), fmt(plan.seconds()), h.columns(), trim(cfg.tremorViewDistance), trim(AttackRumble.VIEWER_PERIOD), trim(cfg.attackRumbleFollowSeconds));
         for (String n : h.notes()) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: attack rumble: {}", n);
     }
 
@@ -636,7 +728,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         long seed = System.nanoTime();
         var params = com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Params.of(plan.radius(), seconds).withMax(plan.maxSixteenths()).withSeed(seed).withStrength(plan.asFraction()).withShare(Tremor::share);
         var h = com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.play(p.level(), p.getX(), p.getZ(), params, viewersOf(p));
-        AttackRun r = new AttackRun(key, null, p.getUUID(), p.level(), h, plan, seed ^ 0x5EED, Tremor.plan(1.0, factor, cfg));
+        AttackRun r = new AttackRun(key, null, p.getUUID(), p.level(), h, plan, seed ^ 0x5EED, Tremor.plan(1.0, factor, cfg), null);
         r.previewSeconds = seconds;
         attackRuns.put(key, r);
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: attack rumble preview {} W{} radius {} max {}/16 strength {} -> 1.0 over {} s, {} s in all, {} columns drawn", p.getGameProfile().name(), trim(size.width), fmt(plan.radius()), plan.maxSixteenths(), fmt(plan.start()), trim(plan.freezeSeconds()), fmt(seconds), h.columns());
@@ -651,17 +743,26 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
             String why = null;
             if (!r.handle.running()) why = "the rumble ran out (hard timeout)";
             else if (r.event != null && r.event.ended()) why = "the event ended";
-            else if (r.event != null && r.event.devoured()) why = "the victim was devoured";
-            else if (p == null) why = "the victim logged off";
-            else if (p.level() != r.level) why = "the victim changed dimension";
-            else if (!p.isAlive()) why = "the victim is dead";
+            else if (p == null) why = "the player logged off";
+            else if (p.level() != r.level) why = "the player changed dimension";
+            else if (!p.isAlive()) why = "the player is dead";
             else if (r.event == null && r.t >= r.previewSeconds) why = "the preview is over";
             if (why != null) { stopAttackRun(r, why); continue; }
             r.t += DT;
             r.viewerT += DT;
+            for (var it = r.retired.iterator(); it.hasNext(); ) {
+                Retired o = it.next();
+                if (r.t >= o.stopAt()) { o.handle().stop(); it.remove(); }
+            }
+            if (r.follow != null) {
+                FreezeRun fr = freezes.get(r.victim);
+                boolean held = fr != null && fr.freeze.held();
+                double[] c = r.follow.update(DT, p.getX(), p.getZ(), held);
+                if (c != null) recentre(r, p, c[0], c[1], held);
+            }
             if (r.viewerT >= AttackRumble.VIEWER_PERIOD - 1e-9) {
                 r.viewerT = 0;
-                int[] ar = r.handle.setViewers(viewersOf(p));
+                int[] ar = r.handle.setViewers(viewersAt(p, r.follow != null ? r.follow.x() : p.getX(), r.follow != null ? r.follow.z() : p.getZ()));
                 if (ar[0] + ar[1] > 0) {
                     r.viewerChanges += ar[0] + ar[1];
                     WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: attack rumble viewers changed: {} came into range, {} left (their blocks are real again)", ar[0], ar[1]);
@@ -674,19 +775,38 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         }
     }
 
+    /**
+     * The rumble of a member moves with them (prompt 17 part 0.1): a new rumble is started at the new centre with the strength curve where it is now and the same end time, and the old one is
+     * stopped after FOLLOW_OVERLAP seconds (the claim rule of prompt 15 lets the two share columns; the sender restores a column only when nobody claims it).
+     */
+    private void recentre(AttackRun r, ServerPlayer p, double x, double z, boolean pinned) {
+        double remaining = Math.max(1.0, r.plan.seconds() - r.t);
+        long seed = r.key * 0x9E3779B97F4A7C15L ^ attackRecentred;
+        var params = com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Params.of(r.plan.radius(), remaining).withMax(r.plan.maxSixteenths()).withSeed(seed)
+                .withStrength(r.plan.asFractionFrom(r.t, remaining)).withShare(Tremor::share);
+        var old = r.handle;
+        r.handle = com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.play(p.level(), x, z, params, viewersAt(p, x, z));
+        r.retired.add(new Retired(old, r.t + FOLLOW_OVERLAP));
+        attackRecentred++;
+        if (pinned) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: attack rumble of {} is pinned on the block they are held on ({}, {}) after {} s", p.getGameProfile().name(), fmt(x), fmt(z), fmt(r.t));
+    }
+
     private void stopAttackRun(AttackRun r, String why) {
         if (attackRuns.remove(r.key) == null) return;
         boolean was = r.handle.running();
         r.handle.stop();
-        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: attack rumble stopped after {} s: {} (cells restored: {}; {} viewer changes)", fmt(r.t), why, was ? "yes" : "already ended", r.viewerChanges);
+        for (Retired o : r.retired) o.handle().stop();
+        r.retired.clear();
+        UUID id = r.victim;
+        ServerPlayer p = online.get(id);
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: attack rumble of {} stopped after {} s: {} (cells restored: {}; {} viewer changes{})", p == null ? id.toString() : p.getGameProfile().name(), fmt(r.t), why, was ? "yes" : "already ended", r.viewerChanges, r.follow == null ? "" : "; centred again " + r.follow.recentred + " time(s)");
     }
 
-    /** The victim is dead (or the strike is over): the attack rumble of the event stops now. Returns true when one was running. */
-    boolean stopAttackRumble(HuntEvent e, String why) {
-        AttackRun r = attackRuns.get(e.id);
-        if (r == null) return false;
-        stopAttackRun(r, why);
-        return true;
+    /** The attack rumble round one player stops now (they are released, killed, or gone). Returns true when one was running. */
+    boolean stopAttackRumbleOf(UUID id, String why) {
+        boolean any = false;
+        for (AttackRun r : new ArrayList<>(attackRuns.values())) if (r.event != null && r.victim.equals(id)) { stopAttackRun(r, why); any = true; }
+        return any;
     }
 
     /** Test and status: the number of attack rumbles running. */

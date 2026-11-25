@@ -57,6 +57,7 @@ public final class HazardRunner {
         String spec = "";
         WormHazard hazard;
         final HazardRules.Ledger killed = new HazardRules.Ledger();
+        final Set<UUID> spared = new HashSet<>();
         boolean builtLogged;
         State(TestWormEntity w) { worm = w; }
     }
@@ -142,11 +143,21 @@ public final class HazardRunner {
             entitiesTested++;
             if (!(e instanceof LivingEntity le) || st.killed.killed(e.getUUID())) continue;
             boolean isVictim = run != null && e.getUUID().equals(run.victim);
-            HazardRules.Verdict v = HazardRules.decide(subject(le), cfg().hazardKillsPlayers, cfg().hazardKillsMobs);
+            SwallowRules.State gs = e instanceof ServerPlayer ? a.groups().stateOf(e.getUUID()) : null;
+            if (gs == SwallowRules.State.SWALLOWED || gs == SwallowRules.State.KILLED) continue;   // already taken
+            HazardRules.Verdict v = HazardRules.decide(subject(le), cfg().hazardKillsPlayers, cfg().hazardKillsMobs, cfg().hazardPlayersImmuneOffSand, cfg().hazardMobsImmuneOffSand);
+            if (v == HazardRules.Verdict.NOT_ON_SAND) {
+                AABB sb = e.getBoundingBox();
+                Box probe = new Box(sb.minX, sb.minY, sb.minZ, sb.maxX, sb.maxY, sb.maxZ);
+                if (hz.firstContact(probe, tPrev, tNow, null) != null && st.spared.add(e.getUUID()))
+                    WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hazard: {} is not on sand, spared", nameOf(le));
+                continue;
+            }
             if (v != HazardRules.Verdict.KILL) continue;
             AABB bb = e.getBoundingBox();
             Box box = new Box(bb.minX, bb.minY, bb.minZ, bb.maxX, bb.maxY, bb.maxZ);
-            WormHazard.Contact c = hz.firstContact(box, tPrev, tNow);
+            Set<String> parts = le instanceof ServerPlayer ? (isVictim ? partsOf(cfg().victimParts) : partsOf(cfg().othersParts)) : null;   // the victim by the throat only, other players by OthersParts, mobs by any part
+            WormHazard.Contact c = hz.firstContact(box, tPrev, tNow, parts);
             if (c == null) continue;
             double wormSeconds = (worm.tickCount - 1 + (double) c.substep() / N) / 20.0;
             st.killed.firstKill(e.getUUID());
@@ -155,6 +166,16 @@ public final class HazardRunner {
         ticksRun++;
         nanosTotal += System.nanoTime() - t0;
     }
+
+    static String nameOf(LivingEntity e) { return e instanceof ServerPlayer sp ? sp.getGameProfile().name() : e.getType().builtInRegistryHolder().key().identifier().toString(); }
+
+    private static Set<String> partsOf(String csv) {
+        Set<String> s = new HashSet<>();
+        for (String p : csv.toLowerCase(Locale.ROOT).split(",")) if (!p.isBlank()) s.add(p.trim());
+        return s;
+    }
+
+    void countKill() { kills++; }
 
     private StrikeRunner.Run strikeRun(TestWormEntity w) { return w.isStrikeWorm() ? strikes.runOfWorm(w) : null; }
 
@@ -165,17 +186,21 @@ public final class HazardRunner {
     HazardRules.Subject subject(LivingEntity e) {
         ServerPlayer sp = e instanceof ServerPlayer p ? p : null;
         boolean exempt = e.getType().builtInRegistryHolder().is(WORM_IMMUNE) || EXEMPTIONS.exempt(e);
-        return new HazardRules.Subject(true, sp != null, sp != null && sp.isCreative(), sp != null && sp.isSpectator(), e.isAlive(), ((Entity) e) instanceof TestWormEntity, cameraTest.test(e), exempt, ledger.refused(e.getUUID()));
+        return new HazardRules.Subject(true, sp != null, sp != null && sp.isCreative(), sp != null && sp.isSpectator(), e.isAlive(), ((Entity) e) instanceof TestWormEntity, cameraTest.test(e), exempt, ledger.refused(e.getUUID()), a.onSandNow(e));
     }
 
     // ---- the kill ----
 
     private void touch(ServerLevel level, TestWormEntity worm, StrikeRunner.Run run, LivingEntity e, boolean isVictim, String part, double wormSeconds) {
         double table = run != null ? run.devourSeconds : 0;
-        String who = e instanceof ServerPlayer sp ? sp.getGameProfile().name() : e.getType().builtInRegistryHolder().key().identifier().toString();
         String kind = HazardRules.kind(isVictim, e instanceof ServerPlayer);
+        String who = nameOf(e);
         if (isVictim) {
             strikes.devourByTouch(run, (ServerPlayer) e, part, wormSeconds);
+            return;
+        }
+        if (e instanceof ServerPlayer sp && run != null) {
+            strikes.swallowOther(run, sp, part, wormSeconds);   // players are swallowed first and killed when the strike ends (prompt 17 part 0.2)
             return;
         }
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {}", HazardRules.killLine(who, part, wormSeconds, table, kind));

@@ -46,6 +46,8 @@ public final class AttackRumble {
         public double strengthAt(double t) { return strength(t, freezeSeconds, start); }
         /** The strength function the rumble of prompt 15 takes: its argument is the fraction 0..1 of {@link #seconds}. */
         public java.util.function.DoubleUnaryOperator asFraction() { return f -> strengthAt(f * seconds); }
+        /** The same curve for a rumble that starts {@code offset} seconds after the freeze began and runs {@code runSeconds} (the rumble that follows the player: each new one continues the curve). */
+        public java.util.function.DoubleUnaryOperator asFractionFrom(double offset, double runSeconds) { return f -> strengthAt(offset + f * runSeconds); }
     }
 
     public static Plan plan(double factor, HuntConfig c, double longestPlaySeconds) {

@@ -42,6 +42,17 @@ public class TestWormEntity extends Entity implements GeoEntity {
     public void markStrikeWorm() { strikeWorm = true; }
     public boolean isStrikeWorm() { return strikeWorm; }
 
+    /** Prompt 17 part 0.4: the game time of the last server tick (0 = never): a worm that stops ticking while its move is not finished is reported. */
+    public long lastServerTickGame;
+
+    /** Prompt 17 part 0.4: why and when a worm goes, on the server (strike worms) and on the client (any), to find out why the worm vanished after the death in the owner's test of prompt 16. */
+    @Override
+    public void onRemoval(Entity.RemovalReason reason) {
+        super.onRemoval(reason);
+        if (this.level().isClientSide()) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] client: worm {} removed, reason {}, age {} ticks", this.getId(), reason, this.tickCount);
+        else if (strikeWorm) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] tick: strike worm {} discarded, reason {}, age {} ticks", this.getId(), reason, this.tickCount);
+    }
+
     private String watchedSpec = "";
     private boolean removeAtEnd;
 
@@ -50,6 +61,7 @@ public class TestWormEntity extends Entity implements GeoEntity {
     public void tick() {
         super.tick();
         if (!(this.level() instanceof ServerLevel)) return;
+        this.lastServerTickGame = this.level().getGameTime();
         var hook = SERVER_TICK_HOOK;
         if (hook != null) {
             try { hook.accept(this); } catch (RuntimeException e) { WormsOfArrakis.LOGGER.warn("[WormsOfArrakis] hazard: the tick of worm {} failed: {}", this.getId(), e.toString()); }

@@ -52,7 +52,7 @@ public final class DeathCamManager {
         public final DeathCam.Setup setup;
         public final double runSeconds, maxSeconds;
         public final long startTick;
-        public final long eventId;     // the hunt event of a nokill strike, else -1
+        public long eventId;     // the hunt event whose strike this camera belongs to (the view is given back when it ends), else -1 (a killed player keeps it until Respawn)
         public final boolean preview;
         public final DeathCam.Radius radius;
         public boolean sent;
@@ -76,7 +76,7 @@ public final class DeathCamManager {
 
     private final Map<UUID, Session> sessions = new LinkedHashMap<>();
     private long tick;
-    private boolean hooked, failedOnce;
+    private boolean failedOnce;
     public int started, restored, leakedEntities;
 
     public Session sessionOf(UUID id) { return sessions.get(id); }
@@ -148,11 +148,6 @@ public final class DeathCamManager {
     @SubscribeEvent
     public void onTick(ServerTickEvent.Post e) {
         tick++;
-        if (!hooked && HuntAdapter.instance() != null) {
-            hooked = true;
-            HuntAdapter.instance().hazard().addKillListener(this::onKill);
-            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] camera: the death camera is listening to the kills of the worm");
-        }
         if (sessions.isEmpty()) return;
         HuntAdapter a = HuntAdapter.instance();
         for (Session s : new ArrayList<>(sessions.values())) {
@@ -182,28 +177,31 @@ public final class DeathCamManager {
         }
     }
 
-    // ---- the kills of the worm ----
+    // ---- the strike camera of a held player (prompt 17 part 0.3) ----
 
-    private void onKill(ServerLevel level, LivingEntity victim, boolean isStrikeVictim, TestWormEntity worm, double wormSeconds) {
-        if (!(victim instanceof ServerPlayer sp)) return;
-        startForDeath(level, sp, worm, wormSeconds);
-    }
-
-    /** A player died to (or, with nokill, was touched by) this worm: the camera starts at the death spot. */
-    public Session startForDeath(ServerLevel level, ServerPlayer sp, TestWormEntity worm, double wormSeconds) {
+    /**
+     * The strike camera starts when the player is held: it orbits THEIR held spot, side-on to the worm (yaw {@code strikeYawDeg}), turning {@code DeathCamTurnDegrees} over the whole run of the move.
+     * Returns null (the reason is logged) when it could not start; the player then just stays held and sees the normal view.
+     */
+    public Session startStrikeCamera(ServerPlayer sp, double strikeYawDeg, int sizeIndex, long seed, double runSeconds, long eventId) {
         List<String> notes = new ArrayList<>();
-        HuntAdapter a = HuntAdapter.instance();
-        var run = a.strikeInfo(worm);
-        WormSpec spec = WormSpec.parse(worm.getSpecString());
-        Moves.Move m = MoveFactory.get(spec);
-        int size = run != null ? run.sizeOrdinal() : sizeIndexOf(m.width);
-        long seed = run != null ? run.eventId() * 0x9E3779B97F4A7C15L + 0xCA3E : worm.getUUID().getLeastSignificantBits();
-        double remaining = Math.max(1.0, m.playTime() + MoveFactory.REMOVE_MARGIN - wormSeconds);
-        double g = groundAt(level, sp.getX(), sp.getZ());
-        double sandY = Double.isNaN(g) ? sp.getY() : g;
-        Session s = start(sp, sp.getX(), sandY, sp.getZ(), worm.getYRot(), size, seed, remaining, params().maxSeconds(), run != null && run.noKill() ? run.eventId() : -1, false, notes);
+        Session s = start(sp, sp.getX(), sp.getY(), sp.getZ(), strikeYawDeg, sizeIndex, seed, Math.max(1.0, runSeconds), params().maxSeconds(), eventId, false, notes);
         for (String n : notes) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] camera: {}", n);
         return s;
+    }
+
+    /** The player is killed at the end: the camera stays on its last pose behind the death screen until Respawn, the timeout or any other end path. */
+    public void detachFromEvent(UUID id) {
+        Session s = sessions.get(id);
+        if (s != null) s.eventId = -1;
+    }
+
+    /** The player is released alive: the camera entity is discarded and their own view is sent back. */
+    public boolean releaseView(UUID id, String why) {
+        Session s = sessions.get(id);
+        if (s == null) return false;
+        restore(s, CameraLifecycle.EndPath.EVENT_END, why);
+        return true;
     }
 
     // ---- giving the view back ----

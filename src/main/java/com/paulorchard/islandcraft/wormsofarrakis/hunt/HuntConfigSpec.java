@@ -113,6 +113,12 @@ public final class HuntConfigSpec {
     static final ModConfigSpec.BooleanValue HAZ_PLAYERS, HAZ_MOBS, HAZ_TEST;
     static final ModConfigSpec.ConfigValue<String> HAZ_PARTS;
     static final ModConfigSpec.DoubleValue[] CAM_DIST = new ModConfigSpec.DoubleValue[4];
+    // prompt 17
+    static final ModConfigSpec.DoubleValue[][] AREA = new ModConfigSpec.DoubleValue[4][4];
+    static final ModConfigSpec.DoubleValue AREA_MARGIN, FOLLOW, SWALLOW_MAX;
+    static final ModConfigSpec.IntValue TICKET_MAX;
+    static final ModConfigSpec.BooleanValue GROUP_RELEASE, HAZ_PL_SAND, HAZ_MOB_SAND;
+    static final ModConfigSpec.ConfigValue<String> VICTIM_PARTS, OTHERS_PARTS;
     static {
         B.push("attack");
         ATTACK_START = d("AttackRumbleStart", 0.7, 0, 1, "Strength of the rumble round the victim at the start of the freeze; it rises linearly to 1.0 at the end of the freeze and stays 1.0 until the death.");
@@ -134,15 +140,30 @@ public final class HuntConfigSpec {
         B.push("deathcam");
         String[] szn = {"small", "medium", "large", "huge"};
         double[] dd = {24, 40, 70, 100};
-        B.comment("Orbit radius (blocks) of the death camera, per size; clamped to 16 x (view distance - 1).").push("DeathCamDistance");
+        B.comment("Orbit radius (blocks) of the strike camera (the key keeps its old name), per size; clamped to 16 x (view distance - 1).").push("DeathCamDistance");
         for (int s = 0; s < 4; s++) CAM_DIST[s] = d(szn[s], dd[s], 4, 1000, "Orbit radius, " + szn[s] + ".");
         B.pop();
-        CAM_TURN = d("DeathCamTurnDegrees", 120, 0, 3600, "Degrees the camera turns round the death spot between the death and the removal of the worm.");
+        CAM_TURN = d("DeathCamTurnDegrees", 120, 0, 3600, "Degrees the strike camera turns round the held spot over the whole run of the move (0 = a locked camera).");
         CAM_MAX = d("DeathCamMaxSeconds", 60, 1, 3600, "The camera is given back to the player after this long if they have not respawned.");
         CAM_LOOK = d("LookHeight", 0.25, 0, 2, "The camera looks at the death spot raised by this x the orbit radius.");
         CAM_HFACTOR = d("DeathCamHeightFactor", 0.45, 0, 4, "Camera height above the sand = this x the orbit radius (at least DeathCamMinHeight).");
         CAM_HMIN = d("DeathCamMinHeight", 8, 0, 1000, "Camera height above the sand is at least this.");
         CAM_CLEAR = d("DeathCamSandClearance", 3, 0, 1000, "Camera height above the sand surface is at least this.");
+        B.pop();
+        B.push("group");
+        String[] mvn = {"crest", "crash", "emerge", "engulf"};
+        B.comment("Radius (blocks) of the strike area per move and size; 0 = derived from the eruption rows (largest ring or disc x r0 + StrikeAreaMargin).").push("StrikeAreaRadius");
+        for (int t = 0; t < 4; t++) { B.push(mvn[t]); for (int s = 0; s < 4; s++) AREA[t][s] = d(szn[s], 0, 0, 1000, "Strike area radius of the " + mvn[t] + ", " + szn[s] + " (0 = derived)."); B.pop(); }
+        B.pop();
+        AREA_MARGIN = d("StrikeAreaMargin", 0, -100, 1000, "Blocks added to the derived strike area radius.");
+        GROUP_RELEASE = B.comment("At the choice of the strike, members of the group outside the chosen move's own circle are released at once.").define("GroupReleaseOutside", true);
+        HAZ_PL_SAND = B.comment("Players that are not on Dune Sand cannot be hurt by the worm.").define("HazardPlayersImmuneOffSand", true);
+        HAZ_MOB_SAND = B.comment("Mobs that are not on Dune Sand cannot be hurt by the worm.").define("HazardMobsImmuneOffSand", true);
+        VICTIM_PARTS = B.comment("Which parts swallow the strike victim: any of body, head, throat (default: only the throat, the mouth closed round them).").define("VictimParts", "throat", o -> o instanceof String);
+        OTHERS_PARTS = B.comment("Which parts swallow everybody else (group members, bystanders).").define("OthersParts", "body,head,throat", o -> o instanceof String);
+        FOLLOW = d("AttackRumbleFollowSeconds", 0.25, 0.05, 5, "While the speed ramps down the attack rumble is centred again on the player this often; once they are held it stays on their block.");
+        SWALLOW_MAX = d("SwallowMaxSeconds", 0, 0, 3600, "Safety: a swallowed player is killed this long after the strike started if the end never comes (0 = the run time of the move + 3 s).");
+        TICKET_MAX = i("StrikeChunkTicketMax", 400, 0, 100000, "At most this many chunks (nearest first) are kept loaded and entity-ticking round the worm during a strike (0 = none).");
         B.pop();
     }
 
@@ -216,6 +237,16 @@ public final class HuntConfigSpec {
             c.deathCamHeightFactor = CAM_HFACTOR.get();
             c.deathCamMinHeight = CAM_HMIN.get();
             c.deathCamSandClearance = CAM_CLEAR.get();
+            for (int t = 0; t < 4; t++) for (int s = 0; s < 4; s++) c.strikeAreaRadius[t][s] = AREA[t][s].get();
+            c.strikeAreaMargin = AREA_MARGIN.get();
+            c.groupReleaseOutside = GROUP_RELEASE.get();
+            c.hazardPlayersImmuneOffSand = HAZ_PL_SAND.get();
+            c.hazardMobsImmuneOffSand = HAZ_MOB_SAND.get();
+            c.victimParts = VICTIM_PARTS.get();
+            c.othersParts = OTHERS_PARTS.get();
+            c.attackRumbleFollowSeconds = FOLLOW.get();
+            c.swallowMaxSeconds = SWALLOW_MAX.get();
+            c.strikeChunkTicketMax = TICKET_MAX.get();
             return true;
         } catch (RuntimeException e) {
             return false;   // not loaded yet: the defaults stay

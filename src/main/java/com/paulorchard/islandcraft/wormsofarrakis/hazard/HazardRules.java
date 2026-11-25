@@ -13,17 +13,23 @@ public final class HazardRules {
     private HazardRules() {}
 
     /** What the rule needs to know about an entity (filled by the adapter). */
-    public record Subject(boolean living, boolean player, boolean creative, boolean spectator, boolean alive, boolean worm, boolean camera, boolean exempt, boolean refusedBefore) {}
+    public record Subject(boolean living, boolean player, boolean creative, boolean spectator, boolean alive, boolean worm, boolean camera, boolean exempt, boolean refusedBefore, boolean onSand) {
+        /** The prompt 16 form: standing on sand (so the sand-only rule of prompt 17 spares nobody). */
+        public Subject(boolean living, boolean player, boolean creative, boolean spectator, boolean alive, boolean worm, boolean camera, boolean exempt, boolean refusedBefore) { this(living, player, creative, spectator, alive, worm, camera, exempt, refusedBefore, true); }
+    }
 
     public enum Verdict {
-        KILL, NOT_LIVING, DEAD, CREATIVE, SPECTATOR, WORM, CAMERA, EXEMPT, PLAYERS_OFF, MOBS_OFF, REFUSED_BEFORE
+        KILL, NOT_LIVING, DEAD, CREATIVE, SPECTATOR, WORM, CAMERA, EXEMPT, PLAYERS_OFF, MOBS_OFF, REFUSED_BEFORE, NOT_ON_SAND
     }
 
     /**
      * The rule: everything living that touches the worm dies, except worms, the camera entity, the dead, players in Creative or Spectator, exempt entities (a predicate or the tag
      * worm_immune), a mob that has already refused to die, and the kinds the config switches off.
      */
-    public static Verdict decide(Subject s, boolean killPlayers, boolean killMobs) {
+    public static Verdict decide(Subject s, boolean killPlayers, boolean killMobs) { return decide(s, killPlayers, killMobs, false, false); }
+
+    /** Prompt 17 part 1: players and mobs that are not on Dune Sand are spared when the matching flag is on (HazardPlayersImmuneOffSand, HazardMobsImmuneOffSand). */
+    public static Verdict decide(Subject s, boolean killPlayers, boolean killMobs, boolean playersImmuneOffSand, boolean mobsImmuneOffSand) {
         if (!s.living()) return Verdict.NOT_LIVING;
         if (s.worm()) return Verdict.WORM;
         if (s.camera()) return Verdict.CAMERA;
@@ -32,9 +38,11 @@ public final class HazardRules {
         if (s.player()) {
             if (s.creative()) return Verdict.CREATIVE;
             if (s.spectator()) return Verdict.SPECTATOR;
+            if (playersImmuneOffSand && !s.onSand()) return Verdict.NOT_ON_SAND;
             return killPlayers ? Verdict.KILL : Verdict.PLAYERS_OFF;
         }
         if (s.refusedBefore()) return Verdict.REFUSED_BEFORE;
+        if (mobsImmuneOffSand && !s.onSand()) return Verdict.NOT_ON_SAND;
         return killMobs ? Verdict.KILL : Verdict.MOBS_OFF;
     }
 

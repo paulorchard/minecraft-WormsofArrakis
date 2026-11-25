@@ -50,6 +50,12 @@ public final class Box {
         return samples;
     }
 
+    /** The part of the box at or above {@code y}, or null when the whole box is below it (prompt 17: what is under the sand is not touched). */
+    public Box above(double y) {
+        if (maxY < y) return null;
+        return minY >= y ? this : new Box(minX, y, minZ, maxX, maxY, maxZ);
+    }
+
     /** Half the diagonal of the box: every sample is within this of the centre. */
     public double halfDiagonal() {
         double dx = maxX - minX, dy = maxY - minY, dz = maxZ - minZ;

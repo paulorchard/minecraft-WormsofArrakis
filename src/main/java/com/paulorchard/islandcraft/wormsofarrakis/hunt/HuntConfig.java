@@ -51,6 +51,12 @@ public final class HuntConfig {
     public boolean hazardKillsPlayers = true, hazardKillsMobs = true, hazardOnTestWorms = false;
     public double[] deathCamDistance = {24, 40, 70, 100};
     public double deathCamTurnDegrees = 120, deathCamMaxSeconds = 60, lookHeight = 0.25, deathCamHeightFactor = 0.45, deathCamMinHeight = 8, deathCamSandClearance = 3;
+    // prompt 17: the strike group
+    public double[][] strikeAreaRadius = new double[4][4];
+    public double strikeAreaMargin = 0, attackRumbleFollowSeconds = 0.25, swallowMaxSeconds = 0;
+    public boolean groupReleaseOutside = true, hazardPlayersImmuneOffSand = true, hazardMobsImmuneOffSand = true;
+    public String victimParts = "throat", othersParts = "body,head,throat";
+    public int strikeChunkTicketMax = 400;
 
     // strike (prompt 14)
     /** The odds of the four types, indexed by StrikeType (crest, crash, emerge, engulf); rescaled over the available ones. */
@@ -91,6 +97,9 @@ public final class HuntConfig {
                 + " HazardKillsPlayers=" + hazardKillsPlayers + " HazardKillsMobs=" + hazardKillsMobs + " HazardOnTestWorms=" + hazardOnTestWorms + " ThroatBackupSeconds=" + throatBackupSeconds);
         l.add("DeathCamDistance=" + java.util.Arrays.toString(deathCamDistance) + " (small, medium, large, huge) DeathCamTurnDegrees=" + deathCamTurnDegrees + " DeathCamMaxSeconds=" + deathCamMaxSeconds + " LookHeight=" + lookHeight
                 + " DeathCamHeightFactor=" + deathCamHeightFactor + " DeathCamMinHeight=" + deathCamMinHeight + " DeathCamSandClearance=" + deathCamSandClearance);
+        l.add("StrikeAreaMargin=" + strikeAreaMargin + " GroupReleaseOutside=" + groupReleaseOutside + " HazardPlayersImmuneOffSand=" + hazardPlayersImmuneOffSand + " HazardMobsImmuneOffSand=" + hazardMobsImmuneOffSand + " VictimParts=" + victimParts + " OthersParts=" + othersParts
+                + " AttackRumbleFollowSeconds=" + attackRumbleFollowSeconds + " SwallowMaxSeconds=" + swallowMaxSeconds + " StrikeChunkTicketMax=" + strikeChunkTicketMax);
+        for (int t = 0; t < 4; t++) for (int s = 0; s < 4; s++) if (strikeAreaRadius[t][s] > 0) l.add("StrikeAreaRadius." + mv[t] + "." + sz[s] + "=" + strikeAreaRadius[t][s] + " (override)");
         for (int t = 0; t < 4; t++) for (int s = 0; s < 4; s++) l.add("DevourSeconds." + mv[t] + "." + sz[s] + "=" + devourSeconds[t][s]);
         return l;
     }

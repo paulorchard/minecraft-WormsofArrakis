@@ -161,12 +161,20 @@ public final class WormHazard {
      * The first contact of a box that stands still between the script times {@code tPrev} and {@code tNow} (the previous tick and this one): the pose is evaluated at
      * {@code settings.substeps} instants, the last being {@code tNow}, shifted by the time offset; the first substep with a touching shape wins (the parts of one substep in the order body, head, throat).
      */
-    public Contact firstContact(Box box, double tPrev, double tNow) {
+    public Contact firstContact(Box box, double tPrev, double tNow) { return firstContact(box, tPrev, tNow, null); }
+
+    /**
+     * Prompt 17 part 0.5: as above, but only the parts in {@code parts} count (null: all the enabled ones) and only what is above the sand level of the move counts: a point of the box below the
+     * origin height of the worm (model y = 0, the sand surface at the strike) touches nobody, so the tunnel and the buried body are harmless.
+     */
+    public Contact firstContact(Box box, double tPrev, double tNow, java.util.Set<String> parts) {
+        Box above = box.above(oy - 1e-6);
+        if (above == null) return null;
         int N = settings.substeps();
         List<WormHitShape> sh = shapes();
         for (int i = 1; i <= N; i++) {
             double t = tPrev + (tNow - tPrev) * i / N + settings.timeOffset();
-            for (WormHitShape s : sh) if (s.touches(box, t)) return new Contact(s.part(), t, i);
+            for (WormHitShape s : sh) if ((parts == null || parts.contains(s.part())) && s.touches(above, t)) return new Contact(s.part(), t, i);
         }
         return null;
     }

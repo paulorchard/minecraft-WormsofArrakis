@@ -57,6 +57,8 @@ public final class HuntCommands {
                 .then(Commands.argument("player", EntityArgument.player()).executes(ctx -> trigger(ctx, EntityArgument.getPlayer(ctx, "player"), null, null, false))
                         .then(sizeBranch(ctx -> EntityArgument.getPlayer(ctx, "player")))));
         h.then(Commands.literal("fake").then(Commands.literal("remove").executes(ctx -> { hunt().removeFakePlayers(); say(ctx, tr("stop.done", 0)); return 1; }))
+                .then(Commands.literal("named").then(Commands.argument("name", StringArgumentType.word()).then(Commands.argument("x", DoubleArgumentType.doubleArg(-30000000, 30000000)).then(Commands.argument("y", DoubleArgumentType.doubleArg(-64, 4000)).then(Commands.argument("z", DoubleArgumentType.doubleArg(-30000000, 30000000))
+                        .executes(ctx -> fakeNamed(ctx, StringArgumentType.getString(ctx, "name"), DoubleArgumentType.getDouble(ctx, "x"), DoubleArgumentType.getDouble(ctx, "y"), DoubleArgumentType.getDouble(ctx, "z"))))))))
                 .then(Commands.literal("trigger").then(sizeBranchFake()))
                 .then(Commands.argument("x", DoubleArgumentType.doubleArg(-30000000, 30000000)).then(Commands.argument("y", DoubleArgumentType.doubleArg(-64, 4000)).then(Commands.argument("z", DoubleArgumentType.doubleArg(-30000000, 30000000))
                         .executes(ctx -> fake(ctx, DoubleArgumentType.getDouble(ctx, "x"), DoubleArgumentType.getDouble(ctx, "y"), DoubleArgumentType.getDouble(ctx, "z")))))));
@@ -67,6 +69,11 @@ public final class HuntCommands {
                 .then(Commands.argument("size", StringArgumentType.word()).suggests((c, b) -> SharedSuggestionProvider.suggest(List.of("small", "medium", "large", "huge", "8", "16", "32", "48"), b))
                         .executes(ctx -> previewAttack(ctx, StringArgumentType.getString(ctx, "size"), 8))
                         .then(Commands.argument("seconds", DoubleArgumentType.doubleArg(-1000, 100000)).executes(ctx -> previewAttack(ctx, StringArgumentType.getString(ctx, "size"), DoubleArgumentType.getDouble(ctx, "seconds"))))))
+                .then(Commands.literal("area").executes(ctx -> previewArea(ctx, "medium", null))
+                .then(Commands.argument("size", StringArgumentType.word()).suggests((c, b) -> SharedSuggestionProvider.suggest(SIZES, b))
+                        .executes(ctx -> previewArea(ctx, StringArgumentType.getString(ctx, "size"), null))
+                        .then(Commands.argument("move", StringArgumentType.word()).suggests((c, b) -> SharedSuggestionProvider.suggest(List.of("crest", "crash", "emerge", "engulf", "max"), b))
+                                .executes(ctx -> previewArea(ctx, StringArgumentType.getString(ctx, "size"), StringArgumentType.getString(ctx, "move"))))))
                 .then(Commands.literal("roar").executes(ctx -> previewRoar(ctx, "huge"))
                 .then(Commands.argument("size", StringArgumentType.word()).suggests((c, b) -> SharedSuggestionProvider.suggest(List.of("small", "medium", "large", "huge", "8", "16", "32", "48"), b))
                         .executes(ctx -> previewRoar(ctx, StringArgumentType.getString(ctx, "size")))))
@@ -80,6 +87,13 @@ public final class HuntCommands {
     private static int fake(CommandContext<CommandSourceStack> ctx, double x, double y, double z) {
         ServerPlayer p = hunt().fakePlayer(ctx.getSource().getLevel(), x, y, z);
         say(ctx, Component.literal("Fake player " + p.getGameProfile().name() + " stands at " + HuntAdapter.fmt(x) + " " + HuntAdapter.fmt(y) + " " + HuntAdapter.fmt(z) + " (test only; it takes part in the hunt like a player)"));
+        return 1;
+    }
+
+    /** Test only: a named fake player (several of them stand in for a group). */
+    private static int fakeNamed(CommandContext<CommandSourceStack> ctx, String name, double x, double y, double z) {
+        ServerPlayer p = hunt().fakePlayer(ctx.getSource().getLevel(), name, x, y, z);
+        say(ctx, Component.literal("Fake player " + p.getGameProfile().name() + " stands at " + HuntAdapter.fmt(x) + " " + HuntAdapter.fmt(y) + " " + HuntAdapter.fmt(z) + " (test only)"));
         return 1;
     }
 
@@ -118,6 +132,7 @@ public final class HuntCommands {
                 String name = s == null ? u.toString() : s.name();
                 say(ctx, tr("status.member", name, HuntAdapter.trim(Math.round(a.manager().aggro().getAggro(u))), s != null && s.onSand() ? tr("on_sand").getString() : tr("off_sand").getString()));
             }
+            for (String gl : a.groups().statusLines(e)) say(ctx, Component.literal(gl));
             if (e.victim() != null) say(ctx, tr("status.victim", e.victimName(), HuntAdapter.trim(Math.round(e.victimScore()))));
             if (!e.killCause().isEmpty()) say(ctx, Component.literal("  the victim died by " + e.killCause() + (e.killCause().startsWith("backup") ? " (the worm never touched them)" : " (the worm touched them)")));
         }
@@ -246,6 +261,18 @@ public final class HuntCommands {
         AttackRumble.Plan plan = a.previewAttackRumble(p, size, sec);
         say(ctx, Component.literal(String.format(Locale.ROOT, "hunt preview attackrumble: %s W%s: radius %.1f blocks, columns move up to %d/16, strength %.2f rising to 1.00 over %.1f s then 1.00, for %.1f s in all, then it stops (the tremor sound and sand particles repeat while it runs)",
                 size.label, HuntAdapter.trim(size.width), plan.radius(), plan.maxSixteenths(), plan.start(), plan.freezeSeconds(), sec)));
+        return 1;
+    }
+
+    /** hunt preview area [size] [move or max]: the strike area as a ring of particles round the caller for about 10 s. */
+    private static int previewArea(CommandContext<CommandSourceStack> ctx, String sizeWord, String move) throws CommandSyntaxException {
+        ServerPlayer p = ctx.getSource().getPlayerOrException();
+        SizeTable.Size size = SizeTable.Size.of(sizeWord.toLowerCase(Locale.ROOT));
+        if (size == null) return fail(ctx, Component.literal("hunt preview area: '" + sizeWord + "' is not small, medium, large or huge"));
+        String m = move == null ? null : move.toLowerCase(Locale.ROOT);
+        if (m != null && !m.equals("max") && StrikeType.of(m) == null) return fail(ctx, Component.literal("hunt preview area: '" + move + "' is not crest, crash, emerge, engulf or max"));
+        for (String l : hunt().previewArea(p, size, m)) say(ctx, Component.literal("hunt preview area: " + l));
+        say(ctx, Component.literal("hunt preview area: the ring is drawn round you for " + AreaPreview.SECONDS + " s, only you see it"));
         return 1;
     }
 
