@@ -13,6 +13,7 @@ public class WormsOfArrakis {
 
     public WormsOfArrakis(IEventBus modBus) {
         LOGGER.info("[WormsOfArrakis] loaded: prompt 01 geometry experiments (GeckoLib only; GeckoMesh does not load on 26.1.2)");
+        LOGGER.info("[WormsOfArrakis] {}", com.paulorchard.islandcraft.wormsofarrakis.fx.SizeFactor.logLine());
         TestSetup.init(modBus);
     }
 }

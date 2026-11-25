@@ -135,8 +135,8 @@ public final class FxClient {
                     st.key = key;
                     st.player = new FxPlayer(MoveFactory.get(spec), opt, MoveFactory.closeTime(spec), MoveFactory.closeEnd(spec), id);
                     STATES.put(id, st);
-                    WormsOfArrakis.LOGGER.info("[WormsOfArrakis] fx player started for worm {}: {} anchors: {} plays={} count scale={} ({} rows of particles, {} cues)", id, spec.mode(),
-                            st.player.anchors().line(), st.player.schedule().size(), String.format(Locale.ROOT, "%.2f", st.player.scale()), CrashFx.EMITTERS.size() + (opt.eruption() ? EruptionFx.ROWS.size() : 0), st.player.cues().size());
+                    WormsOfArrakis.LOGGER.info("[WormsOfArrakis] fx player started for worm {}: {} anchors: {} plays={} size factor={} count scale={} ({} rows of particles, {} cues)", id, spec.mode(),
+                            st.player.anchors().line(), st.player.schedule().size(), String.format(Locale.ROOT, "%.2f", st.player.sizeFactor()), String.format(Locale.ROOT, "%.2f", st.player.scale()), CrashFx.EMITTERS.size() + (opt.eruption() ? EruptionFx.ROWS.size() : 0), st.player.cues().size());
                 }
                 st.player.setRuntime(FxFlags.sound, FxFlags.particles, FxFlags.solo);
                 st.player.step(MoveFactory.tau(spec, w.tickCount), liveParticles(mc), new McSink(mc, level, w));

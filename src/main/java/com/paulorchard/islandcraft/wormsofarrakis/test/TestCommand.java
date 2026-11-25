@@ -12,6 +12,7 @@ import com.paulorchard.islandcraft.wormsofarrakis.WormsOfArrakis;
 import com.paulorchard.islandcraft.wormsofarrakis.fx.CrashFx;
 import com.paulorchard.islandcraft.wormsofarrakis.fx.FxAnchors;
 import com.paulorchard.islandcraft.wormsofarrakis.fx.FxOptions;
+import com.paulorchard.islandcraft.wormsofarrakis.fx.SizeFactor;
 import com.paulorchard.islandcraft.wormsofarrakis.fx.FxPlayer;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.BendLimit;
 import com.paulorchard.islandcraft.wormsofarrakis.geometry.ScaleMath;
@@ -522,9 +523,9 @@ final class TestCommand {
         FxOptions fo = MoveFactory.fxOptions(s);
         if (fo.on()) {
             FxAnchors.Anchors an = FxAnchors.of(m, MoveFactory.closeTime(s), MoveFactory.closeEnd(s));
-            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} fx: on sound={} particles={} fxvol={} fxcount={} eruption={} count scale={} (r0={}, min(r0/8, {})) sound plays={} anchors: {}", m.label(), fo.sound() ? "on" : "off", fo.particles() ? "on" : "off",
-                    trim(fo.vol()), trim(fo.count()), fo.eruption() ? "on" : "off", String.format(Locale.ROOT, "%.2f", fo.countScale(m.r0)), String.format(Locale.ROOT, "%.2f", m.r0), CrashFx.MAX_AUTO_SCALE,
-                    FxPlayer.expand(an, fo, 0).size(), an.line());
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} fx: on sound={} particles={} fxvol={} fxcount={} eruption={} size factor={} (W{}) count scale={} (size factor x fxcount; the sheet counts and the volumes below are the W48 reference numbers, times this) sound plays={} anchors: {}", m.label(), fo.sound() ? "on" : "off", fo.particles() ? "on" : "off",
+                    trim(fo.vol()), trim(fo.count()), fo.eruption() ? "on" : "off", String.format(Locale.ROOT, "%.2f", SizeFactor.of(m.width)), trim(m.width), String.format(Locale.ROOT, "%.2f", fo.countScale(m.width)),
+                    FxPlayer.expand(an, fo, 0, SizeFactor.of(m.width)).size(), an.line());
             WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {}", fxRegistryLine());
         } else {
             WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} fx: off", m.label());

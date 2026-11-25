@@ -28,6 +28,6 @@ public record FxOptions(boolean on, boolean sound, boolean particles, double vol
 
     public boolean isDefault(boolean dfltOn) { return on == dfltOn && sound && particles && vol == 1 && count == 1 && eruption && xeruption; }
 
-    /** The count scale of a particle row: r0 / 8 but at most {@link CrashFx#MAX_AUTO_SCALE}, times fxcount. */
-    public double countScale(double r0) { return Math.min(r0 / CrashFx.COUNT_REFERENCE_R0, CrashFx.MAX_AUTO_SCALE) * count; }
+    /** The count scale of a particle row (prompt 12): {@link SizeFactor#of} of the body width, times fxcount. It replaces the old r0 / 8 (cap 2) scale. */
+    public double countScale(double width) { return SizeFactor.of(width) * count; }
 }

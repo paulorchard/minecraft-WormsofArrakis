@@ -301,8 +301,8 @@ class Prompt09Test {
         FxOptions o = FxOptions.defaults(true);
         Run r = run(m, o, 1, 0);
         FxAnchors.Anchors a = r.player.anchors();
-        double scale = o.countScale(m.r0);
-        assertEquals(m.r0 / 8, scale, 1e-9);
+        double scale = o.countScale(m.width);
+        assertEquals(com.paulorchard.islandcraft.wormsofarrakis.fx.SizeFactor.of(m.width), scale, 1e-9);
         for (int i = 0; i < CrashFx.EMITTERS.size(); i++) {
             CrashFx.Emitter e = CrashFx.EMITTERS.get(i);
             double expected = e.isBurst() ? e.burst() * scale : e.rate() * (a.at(e.until()) - (a.at(e.from()) + e.off())) * scale;
@@ -311,7 +311,7 @@ class Prompt09Test {
                 assertTrue(got < expected && got > 0.2 * expected, e.name() + " thinned by proximity: " + got + " of " + expected);
                 continue;
             }
-            assertEquals(expected, got, Math.max(0.05 * expected, e.isBurst() ? 3 : 0), e.name() + ": " + got + " vs " + expected);
+            assertEquals(expected, got, Math.max(0.05 * expected, e.isBurst() ? 3 : 1), e.name() + ": " + got + " vs " + expected);
         }
     }
 
@@ -418,9 +418,9 @@ class Prompt09Test {
         Run quiet = run(m, new FxOptions(true, false, true, 1, 1), 1, 0);
         assertEquals(0, quiet.sounds.size(), "fxsound=off");
         assertTrue(quiet.spawns.size() > 1000, "the particles do not depend on the sound switch");
-        // the default scale follows r0 / 8 and is capped
-        assertEquals(m.r0 / 8, FxOptions.defaults(true).countScale(m.r0), 1e-9);
-        assertEquals(CrashFx.MAX_AUTO_SCALE, FxOptions.defaults(true).countScale(24), 1e-9);
+        // the default scale is the size factor of the width (prompt 12; it replaced r0 / 8 capped at 2): W16 gives 0.5, W48 and above 1
+        assertEquals(0.5, FxOptions.defaults(true).countScale(m.width), 1e-9);
+        assertEquals(1.0, FxOptions.defaults(true).countScale(60), 1e-9);
     }
 
     @Test

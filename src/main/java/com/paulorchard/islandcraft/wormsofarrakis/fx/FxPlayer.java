@@ -30,6 +30,8 @@ public final class FxPlayer {
     private final List<Play> schedule;
     private final Random rng;
     private final double scale;
+    /** Prompt 12: the share of the previs numbers for this width (volume, count, non-block size). */
+    private final double sizeFactor;
     /** One stream of particles: a row of the sheet at one site. site 0 = the entry crossing (the only one of crash, emerge, engulf), 1 = the exit crossing (crest). */
     public record Lane(int row, boolean eruption, int site, double start, double end, boolean instant, double perSecond, int count, double half) {}
 
@@ -67,9 +69,10 @@ public final class FxPlayer {
         this.closeTime = closeTime;
         this.closeEnd = closeEnd;
         this.cues = cuesFor(a);
-        this.schedule = expand(a, opt, seed);
+        this.schedule = expand(a, opt, seed, SizeFactor.of(m.width));
         this.rng = new Random(seed * 7919L + 17);
-        this.scale = opt.countScale(m.r0);
+        this.sizeFactor = SizeFactor.of(m.width);
+        this.scale = opt.countScale(m.width);
         this.seed = seed;
         this.rngE = new Random(seed * 104729L + 31);
         buildLanes();
@@ -144,6 +147,7 @@ public final class FxPlayer {
     public FxAnchors.Anchors anchors() { return a; }
     public List<Play> schedule() { return schedule; }
     public double scale() { return scale; }
+    public double sizeFactor() { return sizeFactor; }
     public long spawned() { return spawned; }
     public long spawnedByRow(int row) { return spawnedByRow[row]; }
     public long thinned() { return thinned; }
@@ -169,7 +173,10 @@ public final class FxPlayer {
      * The sound plays of a loop: every cue expanded to from + off + i x every, i < rep, sorted by time. Nothing when fx, fxsound is off or fxvol is 0.
      * Cues whose anchor is undefined (NaN) play nothing. The pitch jitter is seeded per (cue, i), so it does not depend on what was cancelled.
      */
-    public static List<Play> expand(FxAnchors.Anchors a, FxOptions opt, long seed) {
+    public static List<Play> expand(FxAnchors.Anchors a, FxOptions opt, long seed) { return expand(a, opt, seed, 1.0); }
+
+    /** As above with the size factor of the worm: every volume is vol x sizeFactor x fxvol (pitch, repeat counts and timing do not change). */
+    public static List<Play> expand(FxAnchors.Anchors a, FxOptions opt, long seed, double sizeFactor) {
         List<Play> l = new ArrayList<>();
         if (!opt.on() || !opt.sound() || opt.vol() <= 0) return l;
         List<Cue> cs = cuesFor(a);
@@ -181,7 +188,7 @@ public final class FxPlayer {
             for (int i = 0; i < cue.rep(); i++) {
                 Random r = new Random(seed * 1000003L + c * 131L + i);
                 double pitch = cue.pitch() * (1 + (r.nextDouble() * 2 - 1) * cue.jit());
-                l.add(new Play(base + cue.off() + i * cue.every(), c, cue.vol() * opt.vol(), pitch));
+                l.add(new Play(base + cue.off() + i * cue.every(), c, cue.vol() * sizeFactor * opt.vol(), pitch));
             }
         }
         l.sort((p, q) -> Double.compare(p.time(), q.time()));
@@ -265,7 +272,11 @@ public final class FxPlayer {
         for (int i = 0; i < E; i++) {
             Lane ln = lanes.get(i);
             if (ln.instant()) {
-                if (ln.start() > a0 && ln.start() <= b0) want[i] = (int) Math.floor(ln.count() * scale + rng.nextDouble());
+                if (ln.start() > a0 && ln.start() <= b0) {
+                    int n = (int) Math.floor(ln.count() * scale + rng.nextDouble());
+                    if (n == 0 && ln.count() >= 1 && scale > 0 && sizeFactor >= SizeFactor.MIN_FACTOR_FOR_ONE) n = 1;   // a row never rounds to zero (above a factor of 0.1)
+                    want[i] = n;
+                }
             } else {
                 double ov = Math.min(b0, ln.end()) - Math.max(a0, ln.start());
                 if (ov > 0) {
@@ -331,6 +342,7 @@ public final class FxPlayer {
                     }
                 }
                 if (s == null) continue;
+                if (sizeFactor < 1 && s.type() != CrashFx.PType.BLOCK && s.type() != CrashFx.PType.CHUNK) s = s.withSize(s.size() * sizeFactor);   // prompt 12: sand blocks keep their size, the rest follows the worm
                 spawned++;
                 spawnedByRow[row]++;
                 aliveEst++;
@@ -432,8 +444,8 @@ public final class FxPlayer {
 
     /** First chat line of the fx command: the options of the move and the runtime switches. */
     public static String headerLine(String label, double width, FxOptions o, double r0, boolean sound, boolean particles, CrashFx.Group solo) {
-        return String.format(Locale.ROOT, "fx of %s W%s: fx=%s fxsound=%s fxparticles=%s fxvol=%s fxcount=%s (count scale %.2f) | runtime: sound %s, particles %s, solo %s",
-                label, t(width), o.on() ? "on" : "off", o.sound() ? "on" : "off", o.particles() ? "on" : "off", t(o.vol()), t(o.count()), o.countScale(r0),
+        return String.format(Locale.ROOT, "fx of %s W%s: fx=%s fxsound=%s fxparticles=%s fxvol=%s fxcount=%s | size factor=%.2f (W%s: the share of the sheet's sound volume, particle counts and non-block particle sizes; count scale %.2f with fxcount) | runtime: sound %s, particles %s, solo %s",
+                label, t(width), o.on() ? "on" : "off", o.sound() ? "on" : "off", o.particles() ? "on" : "off", t(o.vol()), t(o.count()), SizeFactor.of(width), t(width), o.countScale(width),
                 sound ? "on" : "off", particles ? "on" : "off", solo == null ? "all" : solo.label());
     }
 

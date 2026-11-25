@@ -19,6 +19,11 @@ public interface FxSink {
     /** One particle to make: type, position, velocity (blocks per tick), lifetime (ticks), full width (blocks), gravity factor of the sheet, tint (0xRRGGBB or -1) and the row. */
     record Spawn(CrashFx.PType type, double x, double y, double z, double vx, double vy, double vz, int life, double size, double grav, int tint, int row,
                  double endScale, double alpha, double shade, double drag, boolean shaped) {
+        /** The same particle with another full width (prompt 12: the size factor of a small worm). */
+        public Spawn withSize(double newSize) {
+            return new Spawn(type, x, y, z, vx, vy, vz, life, newSize, grav, tint, row, endScale, alpha, shade, drag, shaped);
+        }
+
         /** A particle of the prompt 09 sheet: no shrink, opaque, no shade, the default drag, not shaped. */
         public Spawn(CrashFx.PType type, double x, double y, double z, double vx, double vy, double vz, int life, double size, double grav, int tint, int row) {
             this(type, x, y, z, vx, vy, vz, life, size, grav, tint, row, 1, 1, 1, 0.98, false);

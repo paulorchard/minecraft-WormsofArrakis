@@ -27,6 +27,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Prompt 10: the eruption rows (part 1) and the effects of the crest (part 2). */
 class Prompt10Test {
+    /** Prompt 12: the size factor of W16 is 0.5 (the old automatic scale was 1.0); fxcount 2 restores the old W16 counts these assertions were written for. */
+    private static final FxOptions TWICE = new FxOptions(true, true, true, 1, 2, true, true);
     private static final double DT = 0.05;
     private static final int E0 = CrashFx.EMITTERS.size();
 
@@ -202,7 +204,7 @@ class Prompt10Test {
 
     @Test
     void curtainHeightsAreBetweenHalfABlockAndFourteenAndAHalf() {
-        Run r = run(crash(16), FxOptions.full(true), 2);
+        Run r = run(crash(16), TWICE, 2);
         int row = erow("curtain");
         double lo = 99, hi = -99;
         int n = 0;
@@ -220,7 +222,7 @@ class Prompt10Test {
 
     @Test
     void chunkRowsMakeQuarterBlockSandParticles() {
-        Run r = run(crash(16), FxOptions.full(true), 2);
+        Run r = run(crash(16), TWICE, 2);
         int n = 0;
         for (FxSink.Spawn p : r.spawns) {
             if (p.type() != PType.CHUNK) continue;
@@ -289,7 +291,7 @@ class Prompt10Test {
     /** Spawns of the tick that ends at tau, for a player stepped up to it with externalLive only on that last tick. */
     private static int[] lastTick(WormSpec s, double tau, int externalLive, long seed) {
         Moves.Move m = move(s);
-        FxPlayer p = new FxPlayer(m, FxOptions.full(true), MoveFactory.closeTime(s), MoveFactory.closeEnd(s), seed);
+        FxPlayer p = new FxPlayer(m, TWICE, MoveFactory.closeTime(s), MoveFactory.closeEnd(s), seed);
         Run r = new Run();
         r.player = p;
         double t = DT;
@@ -394,7 +396,7 @@ class Prompt10Test {
     void entryRowsNeverEmitAtTheExitAndTheReverse() {
         WormSpec s = crest(16, 1.3, "");
         Moves.Move m = move(s);
-        Run r = run(s, FxOptions.full(true), 5);
+        Run r = run(s, TWICE, 5);
         FxAnchors.Anchors a = r.player.anchors();
         double R = m.r0;
         int fountain = row("Breach: sand fountain"), burst = row("Fall: re-entry burst"), pour = row("Fall: sand pouring into the hole");
@@ -429,7 +431,7 @@ class Prompt10Test {
     void theCrestHasNoHoldRowsAndTheFallRowsAreAtTheExit() {
         WormSpec s = crest(16, 1.3, "");
         FxAnchors.Anchors a = anchors(s);
-        Run r = run(s, FxOptions.full(true), 5);
+        Run r = run(s, TWICE, 5);
         assertEquals(0, r.byRow(row("Hold: sand sliding off the body")), "no hold rows");
         for (FxPlayer.Lane l : r.player.lanes()) if (!l.eruption()) assertFalse(CrashFx.EMITTERS.get(l.row()).name().startsWith("Hold"));
         List<FxPlayer.Play> plays = FxPlayer.expand(a, FxOptions.full(true), 1);
