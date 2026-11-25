@@ -63,7 +63,11 @@ public final class HuntCommands {
         h.then(Commands.literal("stop").executes(ctx -> stop(ctx, null))
                 .then(Commands.argument("player", EntityArgument.player()).executes(ctx -> stop(ctx, EntityArgument.getPlayer(ctx, "player")))));
         h.then(Commands.literal("ignore").then(Commands.argument("player", EntityArgument.player()).executes(ctx -> ignore(ctx, EntityArgument.getPlayer(ctx, "player")))));
-        h.then(Commands.literal("preview").then(Commands.literal("roar").executes(ctx -> previewRoar(ctx, "huge"))
+        h.then(Commands.literal("preview").then(Commands.literal("attackrumble").executes(ctx -> previewAttack(ctx, "huge", 8))
+                .then(Commands.argument("size", StringArgumentType.word()).suggests((c, b) -> SharedSuggestionProvider.suggest(List.of("small", "medium", "large", "huge", "8", "16", "32", "48"), b))
+                        .executes(ctx -> previewAttack(ctx, StringArgumentType.getString(ctx, "size"), 8))
+                        .then(Commands.argument("seconds", DoubleArgumentType.doubleArg(-1000, 100000)).executes(ctx -> previewAttack(ctx, StringArgumentType.getString(ctx, "size"), DoubleArgumentType.getDouble(ctx, "seconds"))))))
+                .then(Commands.literal("roar").executes(ctx -> previewRoar(ctx, "huge"))
                 .then(Commands.argument("size", StringArgumentType.word()).suggests((c, b) -> SharedSuggestionProvider.suggest(List.of("small", "medium", "large", "huge", "8", "16", "32", "48"), b))
                         .executes(ctx -> previewRoar(ctx, StringArgumentType.getString(ctx, "size")))))
                 .then(Commands.literal("tremor").executes(ctx -> preview(ctx, 1.0, 48))
@@ -213,6 +217,31 @@ public final class HuntCommands {
         hunt().playRoar(p, size, System.nanoTime());
         say(ctx, Component.literal(String.format(Locale.ROOT, "hunt preview roar: %s W%s: origin %.0f blocks away on a random bearing, volume %.2f (heard within %.0f blocks of it, loudness %.2f at you); see the log line 'hunt: roar origin=...'",
                 size.label, HuntAdapter.trim(size.width), d, v, Roar.range(v), Roar.loudness(d, v))));
+        return 1;
+    }
+
+    /** hunt preview attackrumble [W|small|medium|large|huge] [seconds=8]: the rumble round the victim of an event of that size, played on the caller with the same curve (strength 0.7 rising to 1.0 over AttackSeconds, then 1.0), then stopped. */
+    private static int previewAttack(CommandContext<CommandSourceStack> ctx, String arg, double seconds) throws CommandSyntaxException {
+        ServerPlayer p = ctx.getSource().getPlayerOrException();
+        SizeTable.Size size = SizeTable.Size.of(arg.toLowerCase(Locale.ROOT));
+        if (size == null) {
+            try {
+                double w = Double.parseDouble(arg);
+                size = SizeTable.Size.SMALL;
+                for (SizeTable.Size s : SizeTable.Size.values()) if (Math.abs(s.width - w) < Math.abs(size.width - w)) size = s;
+                say(ctx, Component.literal("hunt preview attackrumble: W" + HuntAdapter.trim(w) + " is not a size of the table (8, 16, 32, 48): the nearest, " + size.label + " W" + HuntAdapter.trim(size.width) + ", is used"));
+            } catch (NumberFormatException ex) {
+                size = SizeTable.Size.HUGE;
+                say(ctx, Component.literal("hunt preview attackrumble: '" + arg + "' is not small, medium, large, huge or a width: huge W48 is used"));
+            }
+        }
+        double sec = Math.max(1, Math.min(120, seconds));
+        if (sec != seconds) say(ctx, Component.literal("hunt preview attackrumble: " + HuntAdapter.fmt(seconds) + " s is outside 1 to 120: " + HuntAdapter.fmt(sec) + " s used"));
+        HuntAdapter a = hunt();
+        a.stateNow(p);
+        AttackRumble.Plan plan = a.previewAttackRumble(p, size, sec);
+        say(ctx, Component.literal(String.format(Locale.ROOT, "hunt preview attackrumble: %s W%s: radius %.1f blocks, columns move up to %d/16, strength %.2f rising to 1.00 over %.1f s then 1.00, for %.1f s in all, then it stops (the tremor sound and sand particles repeat while it runs)",
+                size.label, HuntAdapter.trim(size.width), plan.radius(), plan.maxSixteenths(), plan.start(), plan.freezeSeconds(), sec)));
         return 1;
     }
 

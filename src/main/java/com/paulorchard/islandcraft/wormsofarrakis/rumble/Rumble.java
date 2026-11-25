@@ -50,6 +50,8 @@ public final class Rumble {
         List<String> notes();
         /** Columns that are drawn (sand with air above, loaded). */
         int columns();
+        /** Prompt 16: replaces the viewers of the running rumble (those who left get the real blocks, new ones the cells that are up). Returns {added, removed}. */
+        int[] setViewers(Collection<ServerPlayer> viewers);
     }
 
     /** Plays a rumble centred on (x, z). The viewers are the players who are sent the fake cells. */

@@ -107,6 +107,45 @@ public final class HuntConfigSpec {
         B.pop();
     }
 
+    // prompt 16
+    static final ModConfigSpec.DoubleValue ATTACK_START, ATTACK_RADIUS, HAZ_SKIN, THROAT_REACH, HAZ_OFFSET, THROAT_BACKUP, CAM_TURN, CAM_MAX, CAM_LOOK, CAM_HFACTOR, CAM_HMIN, CAM_CLEAR;
+    static final ModConfigSpec.IntValue ATTACK_MAX, HAZ_SUBSTEPS, HAZ_ENTITIES;
+    static final ModConfigSpec.BooleanValue HAZ_PLAYERS, HAZ_MOBS, HAZ_TEST;
+    static final ModConfigSpec.ConfigValue<String> HAZ_PARTS;
+    static final ModConfigSpec.DoubleValue[] CAM_DIST = new ModConfigSpec.DoubleValue[4];
+    static {
+        B.push("attack");
+        ATTACK_START = d("AttackRumbleStart", 0.7, 0, 1, "Strength of the rumble round the victim at the start of the freeze; it rises linearly to 1.0 at the end of the freeze and stays 1.0 until the death.");
+        ATTACK_RADIUS = d("AttackRumbleRadius", 10, 1, 64, "Radius (blocks) of the rumble round the victim at a huge worm; smaller worms scale it by their size factor (at least 5).");
+        ATTACK_MAX = i("AttackRumbleMaxSixteenths", 12, 1, 15, "The most a column moves in the attack rumble (sixteenths), times 0.5 + 0.5 x the size factor.");
+        B.pop();
+        B.push("hazard");
+        HAZ_SKIN = d("HazardSkin", 0.3, 0, 5, "Blocks added to the skin radius of the body and to the outer flaps of the head: how far from the worm still counts as touching it.");
+        THROAT_REACH = d("ThroatReach", 0.4, 0, 5, "Blocks in front of the rim disc of the throat (head frame z from 0) that count as contact.");
+        HAZ_PARTS = B.comment("Which shapes kill: any of body, head, throat (comma separated).").define("HazardParts", "body,head,throat", o -> o instanceof String);
+        HAZ_SUBSTEPS = i("HazardSubsteps", 4, 1, 64, "Instants per tick at which the pose of the worm is tested between the previous tick and this one (a fast worm cannot skip a player).");
+        HAZ_OFFSET = d("HazardTimeOffsetSeconds", 0, -2, 2, "Added to the script time of the worm for the contact test (the client pose lags the server by a little; tune here).");
+        HAZ_ENTITIES = i("HazardEntitiesPerTick", 200, 1, 100000, "At most this many entities (nearest first) are tested per tick.");
+        HAZ_PLAYERS = B.comment("Players in Survival or Adventure die when they touch the worm.").define("HazardKillsPlayers", true);
+        HAZ_MOBS = B.comment("Living non-worm mobs die when they touch the worm.").define("HazardKillsMobs", true);
+        HAZ_TEST = B.comment("Test worms (/arrakis-worm and /arrakis_worm_test) are deadly too; the strike worm always is.").define("HazardOnTestWorms", false);
+        THROAT_BACKUP = d("ThroatBackupSeconds", 1.5, 0, 60, "The victim is killed this long after the DevourSeconds time if the worm has not touched them by then.");
+        B.pop();
+        B.push("deathcam");
+        String[] szn = {"small", "medium", "large", "huge"};
+        double[] dd = {24, 40, 70, 100};
+        B.comment("Orbit radius (blocks) of the death camera, per size; clamped to 16 x (view distance - 1).").push("DeathCamDistance");
+        for (int s = 0; s < 4; s++) CAM_DIST[s] = d(szn[s], dd[s], 4, 1000, "Orbit radius, " + szn[s] + ".");
+        B.pop();
+        CAM_TURN = d("DeathCamTurnDegrees", 120, 0, 3600, "Degrees the camera turns round the death spot between the death and the removal of the worm.");
+        CAM_MAX = d("DeathCamMaxSeconds", 60, 1, 3600, "The camera is given back to the player after this long if they have not respawned.");
+        CAM_LOOK = d("LookHeight", 0.25, 0, 2, "The camera looks at the death spot raised by this x the orbit radius.");
+        CAM_HFACTOR = d("DeathCamHeightFactor", 0.45, 0, 4, "Camera height above the sand = this x the orbit radius (at least DeathCamMinHeight).");
+        CAM_HMIN = d("DeathCamMinHeight", 8, 0, 1000, "Camera height above the sand is at least this.");
+        CAM_CLEAR = d("DeathCamSandClearance", 3, 0, 1000, "Camera height above the sand surface is at least this.");
+        B.pop();
+    }
+
     public static final ModConfigSpec SPEC = B.build();
 
     /** Copies the config values into {@code c}; the defaults stay when the config is not loaded yet. Returns true when it was loaded. */
@@ -157,6 +196,26 @@ public final class HuntConfigSpec {
             for (int t = 0; t < 4; t++) for (int s = 0; s < 4; s++) c.devourSeconds[t][s] = DEVOUR[t][s].get();
             c.strikeYawMode = YAW_MODE.get();
             c.scanColumnsPerTick = SCAN_COLUMNS.get();
+            c.attackRumbleStart = ATTACK_START.get();
+            c.attackRumbleRadius = ATTACK_RADIUS.get();
+            c.attackRumbleMaxSixteenths = ATTACK_MAX.get();
+            c.hazardSkin = HAZ_SKIN.get();
+            c.throatReach = THROAT_REACH.get();
+            c.hazardParts = HAZ_PARTS.get();
+            c.hazardSubsteps = HAZ_SUBSTEPS.get();
+            c.hazardTimeOffsetSeconds = HAZ_OFFSET.get();
+            c.hazardEntitiesPerTick = HAZ_ENTITIES.get();
+            c.hazardKillsPlayers = HAZ_PLAYERS.get();
+            c.hazardKillsMobs = HAZ_MOBS.get();
+            c.hazardOnTestWorms = HAZ_TEST.get();
+            c.throatBackupSeconds = THROAT_BACKUP.get();
+            for (int s = 0; s < 4; s++) c.deathCamDistance[s] = CAM_DIST[s].get();
+            c.deathCamTurnDegrees = CAM_TURN.get();
+            c.deathCamMaxSeconds = CAM_MAX.get();
+            c.lookHeight = CAM_LOOK.get();
+            c.deathCamHeightFactor = CAM_HFACTOR.get();
+            c.deathCamMinHeight = CAM_HMIN.get();
+            c.deathCamSandClearance = CAM_CLEAR.get();
             return true;
         } catch (RuntimeException e) {
             return false;   // not loaded yet: the defaults stay

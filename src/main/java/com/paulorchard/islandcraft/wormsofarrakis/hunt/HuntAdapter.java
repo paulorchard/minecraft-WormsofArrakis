@@ -213,6 +213,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         particleReqs.clear();
         mgr.tick(DT, this);
         tickFreezes();
+        tickAttackRumbles();
         playRoarShots();
         strikes.tick();
         flushParticles();
@@ -306,6 +307,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         run.freeze.tick(0);   // nothing moves yet, but the jump block applies from this very tick
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: freeze start victim={} for {} s (speed cut linearly to zero, jumping blocked, held on the spot); nothing else of the world is changed", p.getGameProfile().name(), trim(e.attackSeconds));
         freezeHook.onFreezeStart(victim, e);
+        startAttackRumble(e, p);
     }
 
     private void tickFreezes() {
@@ -463,16 +465,23 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         Tremor.Plan plan = Tremor.plan(strength, factor, cfg);
         ServerLevel level = p.level();
         double x = p.getX(), y = p.getY(), z = p.getZ();
-        SoundEvent low = sound("entity.warden.step"), crack = sound("block.sand.break");
-        if (low != null) level.playSound(null, x, y, z, low, SoundSource.HOSTILE, (float) plan.volume(), 0.5f);
-        if (crack != null) level.playSound(null, x, y, z, crack, SoundSource.BLOCKS, (float) Math.max(0.5, plan.volume() * 0.7), 0.6f);
-        BlockState sand = sandStateUnder(level, p);
-        particleReqs.add(new ParticleReq(level, sand, x, y + 0.2, z, plan.particles(), plan.radius() * 0.4, 0.3, plan.radius() * 0.4, 0.25));
+        tremorFx(p, plan);
         var h = rumbleFor(eventId, p, plan, eventId * 0x9E3779B97F4A7C15L + (tremorSeq++));
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: tremor rumble S={} radius {} blocks max {}/16 share of columns {} columns drawn {}", fmt(plan.strength()), fmt(plan.radius()), plan.maxSixteenths(), fmt(Tremor.share(plan.strength())), h.columns());
         for (String n : h.notes()) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: tremor rumble: {}", n);
         TremorFx.onTremor(p, strength);
         return plan;
+    }
+
+    /** The sound and the sand particles of one tremor under a player (prompt 13), also repeated by the attack rumble at strength 1. */
+    private void tremorFx(ServerPlayer p, Tremor.Plan plan) {
+        ServerLevel level = p.level();
+        double x = p.getX(), y = p.getY(), z = p.getZ();
+        SoundEvent low = sound("entity.warden.step"), crack = sound("block.sand.break");
+        if (low != null) level.playSound(null, x, y, z, low, SoundSource.HOSTILE, (float) plan.volume(), 0.5f);
+        if (crack != null) level.playSound(null, x, y, z, crack, SoundSource.BLOCKS, (float) Math.max(0.5, plan.volume() * 0.7), 0.6f);
+        BlockState sand = sandStateUnder(level, p);
+        particleReqs.add(new ParticleReq(level, sand, x, y + 0.2, z, plan.particles(), plan.radius() * 0.4, 0.3, plan.radius() * 0.4, 0.25));
     }
 
     private BlockState sandStateUnder(ServerLevel level, ServerPlayer p) {
@@ -514,6 +523,8 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
     private final Map<Long, List<com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Handle>> rumbles = new HashMap<>();
 
     private int stopRumbles(long eventId) {
+        AttackRun ar = attackRuns.get(eventId);
+        if (ar != null) stopAttackRun(ar, "the event ended or the server is stopping");
         List<com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Handle> l = rumbles.remove(eventId);
         int n = 0;
         if (l != null) for (var h : l) if (h.running()) { h.stop(); n++; }
@@ -521,6 +532,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
     }
 
     private void stopAllRumbles() {
+        for (AttackRun ar : new ArrayList<>(attackRuns.values())) stopAttackRun(ar, "server stopping");
         for (long id : new ArrayList<>(rumbles.keySet())) stopRumbles(id);
     }
 
@@ -540,6 +552,132 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         rumbles.get(eventId).removeIf(x -> !x.running());
         return h;
     }
+
+    // ---- the attack rumble (prompt 16 part 1): one long rumble round the victim from the start of the freeze until the death ----
+
+    /** One running attack rumble: of an event (until the death or the end), or a preview (until its seconds are over). */
+    private static final class AttackRun {
+        final long key;
+        final HuntEvent event;   // null for a preview
+        final UUID victim;
+        final ServerLevel level;
+        final com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Handle handle;
+        final AttackRumble.Plan plan;
+        final AttackRumble.FxClock fx;
+        final Tremor.Plan fxPlan;
+        double t, viewerT;
+        int viewerChanges;
+        double previewSeconds;
+
+        AttackRun(long key, HuntEvent event, UUID victim, ServerLevel level, com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Handle handle, AttackRumble.Plan plan, long seed, Tremor.Plan fxPlan) {
+            this.key = key;
+            this.event = event;
+            this.victim = victim;
+            this.level = level;
+            this.handle = handle;
+            this.plan = plan;
+            this.fx = new AttackRumble.FxClock(seed);
+            this.fxPlan = fxPlan;
+        }
+    }
+
+    private final Map<Long, AttackRun> attackRuns = new HashMap<>();
+    private long previewSeq = -1;
+
+    /** The players who see the rumble round a victim: the victim and everybody within TremorViewDistance of them, in the same dimension. */
+    private List<ServerPlayer> viewersOf(ServerPlayer p) {
+        List<ServerPlayer> viewers = new ArrayList<>();
+        viewers.add(p);
+        double vd2 = cfg.tremorViewDistance * cfg.tremorViewDistance;
+        ServerLevel level = p.level();
+        for (ServerPlayer v : level.players()) if (v != p && v.distanceToSqr(p.getX(), v.getY(), p.getZ()) <= vd2) viewers.add(v);
+        for (ServerPlayer v : extra) if (v != p && v.level() == level && !viewers.contains(v) && v.distanceToSqr(p.getX(), v.getY(), p.getZ()) <= vd2) viewers.add(v);
+        return viewers;
+    }
+
+    private double longestPlay(SizeTable.Size size) {
+        double m = 0;
+        for (StrikeType t : StrikeType.values()) m = Math.max(m, strikes.plan(t, size).playTime());
+        return m;
+    }
+
+    private void startAttackRumble(HuntEvent e, ServerPlayer p) {
+        AttackRumble.Plan plan = AttackRumble.plan(e.factor, cfg, longestPlay(e.size));
+        long seed = e.id * 0x9E3779B97F4A7C15L ^ 0xA77ACCL;
+        var params = com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Params.of(plan.radius(), plan.seconds()).withMax(plan.maxSixteenths()).withSeed(seed)
+                .withStrength(plan.asFraction()).withShare(Tremor::share);
+        var h = com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.play(p.level(), p.getX(), p.getZ(), params, viewersOf(p));
+        AttackRun r = new AttackRun(e.id, e, p.getUUID(), p.level(), h, plan, seed ^ 0x5EED, Tremor.plan(1.0, e.factor, cfg));
+        attackRuns.put(e.id, r);
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: attack rumble start victim={} radius {} blocks max {}/16 strength {} -> 1.0 over {} s then 1.0 until the death (limit {} s), {} columns drawn, viewers within {} blocks re-chosen every {} s",
+                p.getGameProfile().name(), fmt(plan.radius()), plan.maxSixteenths(), fmt(plan.start()), trim(plan.freezeSeconds()), fmt(plan.seconds()), h.columns(), trim(cfg.tremorViewDistance), trim(AttackRumble.VIEWER_PERIOD));
+        for (String n : h.notes()) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: attack rumble: {}", n);
+    }
+
+    /** The command: the attack rumble of a size on the caller with the same curve, for {@code seconds}, then it stops. */
+    public AttackRumble.Plan previewAttackRumble(ServerPlayer p, SizeTable.Size size, double seconds) {
+        double factor = SizeFactor.of(size.width);
+        AttackRumble.Plan plan = AttackRumble.plan(factor, cfg, 0);
+        plan = new AttackRumble.Plan(plan.radius(), plan.maxSixteenths(), plan.start(), plan.freezeSeconds(), seconds, factor);
+        long key = previewSeq--;
+        long seed = System.nanoTime();
+        var params = com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Params.of(plan.radius(), seconds).withMax(plan.maxSixteenths()).withSeed(seed).withStrength(plan.asFraction()).withShare(Tremor::share);
+        var h = com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.play(p.level(), p.getX(), p.getZ(), params, viewersOf(p));
+        AttackRun r = new AttackRun(key, null, p.getUUID(), p.level(), h, plan, seed ^ 0x5EED, Tremor.plan(1.0, factor, cfg));
+        r.previewSeconds = seconds;
+        attackRuns.put(key, r);
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: attack rumble preview {} W{} radius {} max {}/16 strength {} -> 1.0 over {} s, {} s in all, {} columns drawn", p.getGameProfile().name(), trim(size.width), fmt(plan.radius()), plan.maxSixteenths(), fmt(plan.start()), trim(plan.freezeSeconds()), fmt(seconds), h.columns());
+        for (String n : h.notes()) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: attack rumble preview: {}", n);
+        return plan;
+    }
+
+    private void tickAttackRumbles() {
+        if (attackRuns.isEmpty()) return;
+        for (AttackRun r : new ArrayList<>(attackRuns.values())) {
+            ServerPlayer p = online.get(r.victim);
+            String why = null;
+            if (!r.handle.running()) why = "the rumble ran out (hard timeout)";
+            else if (r.event != null && r.event.ended()) why = "the event ended";
+            else if (r.event != null && r.event.devoured()) why = "the victim was devoured";
+            else if (p == null) why = "the victim logged off";
+            else if (p.level() != r.level) why = "the victim changed dimension";
+            else if (!p.isAlive()) why = "the victim is dead";
+            else if (r.event == null && r.t >= r.previewSeconds) why = "the preview is over";
+            if (why != null) { stopAttackRun(r, why); continue; }
+            r.t += DT;
+            r.viewerT += DT;
+            if (r.viewerT >= AttackRumble.VIEWER_PERIOD - 1e-9) {
+                r.viewerT = 0;
+                int[] ar = r.handle.setViewers(viewersOf(p));
+                if (ar[0] + ar[1] > 0) {
+                    r.viewerChanges += ar[0] + ar[1];
+                    WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: attack rumble viewers changed: {} came into range, {} left (their blocks are real again)", ar[0], ar[1]);
+                }
+            }
+            if (r.fx.due(r.t)) {
+                r.fx.fired(r.t);
+                tremorFx(p, r.fxPlan);
+            }
+        }
+    }
+
+    private void stopAttackRun(AttackRun r, String why) {
+        if (attackRuns.remove(r.key) == null) return;
+        boolean was = r.handle.running();
+        r.handle.stop();
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: attack rumble stopped after {} s: {} (cells restored: {}; {} viewer changes)", fmt(r.t), why, was ? "yes" : "already ended", r.viewerChanges);
+    }
+
+    /** The victim is dead (or the strike is over): the attack rumble of the event stops now. Returns true when one was running. */
+    boolean stopAttackRumble(HuntEvent e, String why) {
+        AttackRun r = attackRuns.get(e.id);
+        if (r == null) return false;
+        stopAttackRun(r, why);
+        return true;
+    }
+
+    /** Test and status: the number of attack rumbles running. */
+    public int attackRumblesRunning() { return attackRuns.size(); }
 
     // ---- helpers ----
 

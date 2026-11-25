@@ -207,6 +207,15 @@ public final class RumbleManager {
         @Override public double seconds() { return ev.seconds(); }
         @Override public List<String> notes() { return notes; }
         @Override public int columns() { return cols; }
+        @Override public int[] setViewers(Collection<ServerPlayer> viewers) {
+            Set<UUID> ids = new LinkedHashSet<>();
+            for (ServerPlayer v : viewers) {
+                if (v.level() != lc.level) continue;
+                instance().players.put(v.getUUID(), v);
+                ids.add(v.getUUID());
+            }
+            return lc.core.setViewers(ev, ids);
+        }
     }
 
     private static boolean isSand(BlockState st) {

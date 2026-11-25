@@ -292,6 +292,7 @@ final class StrikeRunner {
             v.setInvisible(false);
             WormsOfArrakis.LOGGER.warn("[WormsOfArrakis] strike: {} could not be killed (damage and death were both refused)", v.getGameProfile().name());
         }
+        a.stopAttackRumble(r.event, "the victim is dead (devoured)");
         a.releaseFreezeOf(r.event);   // the victim is dead: nothing of the freeze stays
     }
 

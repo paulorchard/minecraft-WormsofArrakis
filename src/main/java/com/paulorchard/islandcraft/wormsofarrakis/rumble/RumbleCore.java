@@ -316,6 +316,38 @@ public final class RumbleCore {
                 + " bytes in all, " + ev.cellsPeak + " columns moving at the most");
     }
 
+    /** Prompt 16: the viewers of a running event change (players walked into or out of range): the ones who left get the real blocks of its columns now, the new ones get the cells that are up. Returns {added, removed}. */
+    public int[] setViewers(Ev ev, Collection<UUID> now) {
+        if (ev.ended) return new int[]{0, 0};
+        Set<UUID> removed = new LinkedHashSet<>(ev.viewers);
+        removed.removeAll(now);
+        Set<UUID> added = new LinkedHashSet<>(now);
+        added.removeAll(ev.viewers);
+        ev.viewers.removeAll(removed);
+        ev.viewers.addAll(added);
+        Map<UUID, List<long[]>> out = new LinkedHashMap<>();
+        for (UUID v : removed) {
+            Map<Long, Integer> sv = shown.get(v);
+            if (sv == null) continue;
+            for (var it = sv.entrySet().iterator(); it.hasNext(); ) {
+                var en = it.next();
+                long pos = en.getKey();
+                if (!ev.index.containsKey(column(ux(pos), uz(pos)))) continue;
+                int want = desired(v, pos);
+                if (want == en.getValue()) continue;
+                if (want == REAL) it.remove(); else en.setValue(want);
+                out.computeIfAbsent(v, k -> new ArrayList<>()).add(new long[]{pos, want == REAL ? host.realState(ux(pos), uy(pos), uz(pos)) : want});
+            }
+        }
+        ev.bytes += flush(out);
+        if (!added.isEmpty()) for (int i = 0; i < ev.xs.length; i++) {
+            if (!ev.alive[i] || ev.off[i] == 0) continue;
+            RumbleCell c = RumbleCell.of(ev.off[i]);
+            if (c.kind() != RumbleCell.Kind.NONE) enqueue(ev, pack(ev.xs[i], c.y(ev.ys[i]), ev.zs[i]));
+        }
+        return new int[]{added.size(), removed.size()};
+    }
+
     /** A viewer leaves (logs off, changes dimension, no longer in range): they are taken out of every event; with {@code canSend} the real blocks are sent to them. Returns the cells restored. */
     public int dropViewer(UUID viewer, boolean canSend) {
         for (Ev ev : events.values()) ev.viewers.remove(viewer);

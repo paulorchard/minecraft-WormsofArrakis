@@ -42,6 +42,16 @@ public final class HuntConfig {
     public int tremorParticles = 40;
     public double tremorSoundVolume = 3.0;
 
+    // prompt 16: the attack rumble, the deadly worm and the death camera
+    public double attackRumbleStart = 0.7, attackRumbleRadius = 10;
+    public int attackRumbleMaxSixteenths = 12;
+    public double hazardSkin = 0.3, throatReach = 0.4, hazardTimeOffsetSeconds = 0, throatBackupSeconds = 1.5;
+    public String hazardParts = "body,head,throat";
+    public int hazardSubsteps = 4, hazardEntitiesPerTick = 200;
+    public boolean hazardKillsPlayers = true, hazardKillsMobs = true, hazardOnTestWorms = false;
+    public double[] deathCamDistance = {24, 40, 70, 100};
+    public double deathCamTurnDegrees = 120, deathCamMaxSeconds = 60, lookHeight = 0.25, deathCamHeightFactor = 0.45, deathCamMinHeight = 8, deathCamSandClearance = 3;
+
     // strike (prompt 14)
     /** The odds of the four types, indexed by StrikeType (crest, crash, emerge, engulf); rescaled over the available ones. */
     public double[] strikeWeights = {30, 25, 25, 20};
@@ -76,6 +86,11 @@ public final class HuntConfig {
         String[] mv = {"crest", "crash", "emerge", "engulf"}, sz = {"small", "medium", "large", "huge"};
         l.add("RumbleMaxSixteenths=" + rumbleMaxSixteenths + " RumblePulseSeconds=" + rumblePulseSeconds + " RumbleEdgeWeight=" + rumbleEdgeWeight + " RumbleViewMargin=" + rumbleViewMargin + " RumbleBlockBudgetPerTick=" + rumbleBlockBudgetPerTick + " RumbleDropSteps=" + rumbleDropSteps + " RumbleStepSeconds=" + rumbleStepSeconds + " RumbleSwingSeconds=" + rumbleSwingSeconds + " TremorRadius=" + tremorRadius);
         l.add("RoarDistance=" + java.util.Arrays.toString(roarDistance) + " (small, medium, large, huge) RoarRangeMargin=" + roarRangeMargin + " RoarFarPitch=" + roarFarPitch);
+        l.add("AttackRumbleStart=" + attackRumbleStart + " AttackRumbleRadius=" + attackRumbleRadius + " AttackRumbleMaxSixteenths=" + attackRumbleMaxSixteenths);
+        l.add("HazardSkin=" + hazardSkin + " ThroatReach=" + throatReach + " HazardParts=" + hazardParts + " HazardSubsteps=" + hazardSubsteps + " HazardTimeOffsetSeconds=" + hazardTimeOffsetSeconds + " HazardEntitiesPerTick=" + hazardEntitiesPerTick
+                + " HazardKillsPlayers=" + hazardKillsPlayers + " HazardKillsMobs=" + hazardKillsMobs + " HazardOnTestWorms=" + hazardOnTestWorms + " ThroatBackupSeconds=" + throatBackupSeconds);
+        l.add("DeathCamDistance=" + java.util.Arrays.toString(deathCamDistance) + " (small, medium, large, huge) DeathCamTurnDegrees=" + deathCamTurnDegrees + " DeathCamMaxSeconds=" + deathCamMaxSeconds + " LookHeight=" + lookHeight
+                + " DeathCamHeightFactor=" + deathCamHeightFactor + " DeathCamMinHeight=" + deathCamMinHeight + " DeathCamSandClearance=" + deathCamSandClearance);
         for (int t = 0; t < 4; t++) for (int s = 0; s < 4; s++) l.add("DevourSeconds." + mv[t] + "." + sz[s] + "=" + devourSeconds[t][s]);
         return l;
     }
