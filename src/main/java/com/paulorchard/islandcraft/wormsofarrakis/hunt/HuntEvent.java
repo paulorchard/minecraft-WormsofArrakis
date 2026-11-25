@@ -1,0 +1,155 @@
+package com.paulorchard.islandcraft.wormsofarrakis.hunt;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
+/**
+ * Prompt 13 part 4: one event, a state machine, engine-free. STALKING (width + StalkExtraSeconds) then ATTACK (AttackSeconds, a placeholder: the victim is chosen and
+ * {@link StrikeHook#onAttack} is called) then ENDED. The list is fixed at the lock; members can only leave. The size and the stalk length never change.
+ */
+public final class HuntEvent {
+    public enum Phase { STALKING, ATTACK, ENDED }
+    public enum EndReason { DONE, FIZZLED, STOPPED }
+
+    /** What the event asks of the world about its members. */
+    public interface View {
+        double score(UUID id);
+        boolean onSand(UUID id);
+        long lastGainTick(UUID id);
+        String name(UUID id);
+    }
+
+    /** The hooks of later prompts and of the game adapter. */
+    public interface Hooks {
+        default void onPhaseChange(HuntEvent e, Phase from, Phase to) {}
+        default void onTick(HuntEvent e) {}
+        default void onEnd(HuntEvent e, EndReason reason) {}
+        /** A tremor of strength S for one listed player (the camera of a later prompt can use this too). */
+        default void onTremor(HuntEvent e, UUID player, double strength, double progress) {}
+        /** The continuous build-up of one listed player: {@code count} sand grains this tick (whole number) at the rate per second {@code rate}. */
+        default void onBuildUp(HuntEvent e, UUID player, int count, double rate, double progress) {}
+    }
+
+    public final long id;
+    public final UUID trigger;
+    public final String dim;
+    public final SizeTable.Size size;
+    public final double width, stalkSeconds, attackSeconds;
+    public final double factor;
+    private final HuntConfig cfg;
+    private final Set<UUID> members = new LinkedHashSet<>();
+    private final Map<UUID, Tremor.Clock> clocks = new HashMap<>();
+    private final Map<UUID, Double> buildAcc = new HashMap<>();
+    private final Hooks hooks;
+    private final StrikeHook strike;
+    private Phase phase = Phase.STALKING;
+    private double phaseTime;
+    private UUID victim;
+    private String victimName = "";
+    private double victimScore;
+    private EndReason endReason;
+
+    public HuntEvent(long id, UUID trigger, String dim, SizeTable.Size size, List<UUID> roster, HuntConfig cfg, Hooks hooks, StrikeHook strike) {
+        this.id = id;
+        this.trigger = trigger;
+        this.dim = dim;
+        this.size = size;
+        this.width = size.width;
+        this.cfg = cfg;
+        this.stalkSeconds = SizeTable.stalkSeconds(size, cfg);
+        this.attackSeconds = cfg.attackSeconds;
+        this.factor = com.paulorchard.islandcraft.wormsofarrakis.fx.SizeFactor.of(size.width);
+        this.hooks = hooks;
+        this.strike = strike;
+        this.members.addAll(roster);
+        for (UUID u : roster) clocks.put(u, new Tremor.Clock(id, u, cfg));
+    }
+
+    public Phase phase() { return phase; }
+    public double phaseTime() { return phaseTime; }
+    public UUID victim() { return victim; }
+    public String victimName() { return victimName; }
+    public double victimScore() { return victimScore; }
+    public EndReason endReason() { return endReason; }
+    public boolean ended() { return phase == Phase.ENDED; }
+    public List<UUID> members() { return new ArrayList<>(members); }
+    public boolean has(UUID id) { return members.contains(id); }
+    public Tremor.Clock clockOf(UUID id) { return clocks.get(id); }
+    /** The fraction of the stalk elapsed, 0 to 1 (1 during ATTACK). */
+    public double progress() { return phase == Phase.STALKING ? Math.min(1, phaseTime / stalkSeconds) : 1; }
+    public double secondsLeft() { return phase == Phase.STALKING ? Math.max(0, stalkSeconds - phaseTime) : phase == Phase.ATTACK ? Math.max(0, attackSeconds - phaseTime) : 0; }
+
+    /** A member leaves (log-off, death, mode, dimension). Nobody joins later. An empty list ends the event FIZZLED. */
+    public void removeMember(UUID id) {
+        if (ended() || !members.remove(id)) return;
+        clocks.remove(id);
+        buildAcc.remove(id);
+        if (members.isEmpty()) end(EndReason.FIZZLED);
+    }
+
+    /** The victim: the highest score among the members on sand right now; ties go to the one who gained most recently. Null when nobody is on sand. */
+    public static UUID chooseVictim(Iterable<UUID> members, View v) {
+        UUID best = null;
+        for (UUID u : members) {
+            if (!v.onSand(u)) continue;
+            if (best == null || v.score(u) > v.score(best) || (v.score(u) == v.score(best) && v.lastGainTick(u) > v.lastGainTick(best))) best = u;
+        }
+        return best;
+    }
+
+    /** Advances the event by {@code dt} seconds. */
+    public void tick(double dt, View v) {
+        if (ended()) return;
+        phaseTime += dt;
+        if (phase == Phase.STALKING) {
+            double p = progress();
+            double s = Tremor.strength(p);
+            for (UUID u : members()) {
+                Tremor.Clock c = clocks.get(u);
+                boolean on = v.onSand(u);
+                if (c != null && c.due(phaseTime)) {
+                    if (on) { c.fired(phaseTime); hooks.onTremor(this, u, s, p); }
+                    else c.skipped(phaseTime);
+                }
+                double rate = on ? Tremor.buildUpRate(p, factor, cfg) : 0;
+                if (rate > 0) {
+                    double acc = buildAcc.merge(u, rate * dt, Double::sum);
+                    int n = (int) Math.floor(acc);
+                    buildAcc.put(u, acc - n);
+                    if (n > 0) hooks.onBuildUp(this, u, n, rate, p);
+                }
+            }
+            hooks.onTick(this);
+            if (phaseTime >= stalkSeconds - 1e-9) {
+                UUID vic = chooseVictim(members, v);
+                if (vic == null) { end(EndReason.FIZZLED); return; }
+                victim = vic;
+                victimName = v.name(vic);
+                victimScore = v.score(vic);
+                Phase from = phase;
+                phase = Phase.ATTACK;
+                phaseTime = 0;
+                hooks.onPhaseChange(this, from, phase);
+                strike.onAttack(this, victim, width, size.label);
+            }
+        } else if (phase == Phase.ATTACK) {
+            hooks.onTick(this);
+            if (phaseTime >= attackSeconds - 1e-9) end(EndReason.DONE);
+        }
+    }
+
+    /** Ends the event now (the list is released by the manager through {@link Hooks#onEnd}). */
+    public void end(EndReason reason) {
+        if (ended()) return;
+        Phase from = phase;
+        phase = Phase.ENDED;
+        endReason = reason;
+        hooks.onPhaseChange(this, from, Phase.ENDED);
+        hooks.onEnd(this, reason);
+    }
+}

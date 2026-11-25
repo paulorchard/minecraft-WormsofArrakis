@@ -85,6 +85,7 @@ final class TestCommand {
         //   crash   height=2.5 lean=7 hold=1.5 speed gravity=12 min_radius=2 pause=2 loop mouth
         //   engulf  exposed=2 lean=7 hold=0.5 speed gravity=12 pause=1.5 loop mouth
         // A bare number keeps its old meaning by position (crest: height, speed; emerge: n, angle, speed, hold; crash: height; engulf: exposed).
+        com.paulorchard.islandcraft.wormsofarrakis.hunt.HuntCommands.attach(root);
         root.then(Commands.literal("moves").executes(ctx -> {
             for (String line : MoveOptions.movesText()) notice(ctx, line);
             return MoveOptions.MOVES.size();
