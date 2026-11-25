@@ -66,10 +66,9 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
     private Set<Block> sandSet = new HashSet<>();
     private List<String> sandKey = List.of();
     private int tickCounter;
-    private final List<Ripple> ripples = new ArrayList<>();
     private final List<ParticleReq> particleReqs = new ArrayList<>();
     private final Map<Long, Integer> tremorCount = new HashMap<>();
-    private long lastParticlesMade, lastBlocksSent;
+    private long lastParticlesMade;
 
     private HuntAdapter() {
         this.mgr = new HuntManager(cfg, this, this::onAttack);
@@ -102,8 +101,6 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
     public HuntConfig config() { return cfg; }
     public ServerPlayer player(UUID id) { return online.get(id); }
     public long lastParticlesMade() { return lastParticlesMade; }
-    public long lastBlocksSent() { return lastBlocksSent; }
-    public int rippleCount() { return ripples.size(); }
 
     // ---- reading the game ----
 
@@ -214,11 +211,9 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         server = e.getServer();
         if (tickCounter++ % 40 == 0) refreshConfig();
         particleReqs.clear();
-        lastBlocksSent = 0;
         mgr.tick(DT, this);
         tickFreezes();
         strikes.tick();
-        stepRipples();
         flushParticles();
     }
 
@@ -243,8 +238,8 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent e) {
         int n = mgr.stop(null);
-        cancelAllRipples();
-        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: server stopping: {} event(s) stopped, every fake block restored", n);
+        stopAllRumbles();
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: server stopping: {} event(s) stopped, every fake cell restored", n);
     }
 
     /** Ends events and restores every fake block (the command and the server stop). */
@@ -285,8 +280,8 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
     public void onEnd(HuntEvent e, HuntEvent.EndReason reason) {
         strikes.onEnd(e, reason);
         releaseFreeze(e);
-        int restored = cancelRipples(e.id);
-        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: event {} ended {} (list scores set to 0; {} fake blocks restored)", e.id, reason, restored);
+        int restored = stopRumbles(e.id);
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: event {} ended {} (list scores set to 0; {} tremor rumble(s) stopped, their cells restored)", e.id, reason, restored);
     }
 
     @Override
@@ -339,6 +334,8 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
     void releaseFreezeOf(HuntEvent e) { releaseFreeze(e); }
 
     boolean isSand(BlockState st) { return sandSet.contains(st.getBlock()); }
+    /** The set SandBlocks of the config (prompt 13): Dune Sand, sand, red sand. */
+    public boolean isSandBlock(BlockState st) { return sandSet.contains(st.getBlock()); }
     Integer surfaceOf(UUID id) { return surface.get(id); }
     StrikeRunner strikes() { return strikes; }
     MinecraftServer server() { return server; }
@@ -402,7 +399,9 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
 
     // ---- tremors ----
 
-    /** One tremor under a player: ripple of fake blocks, sound, particles, and the camera hook. Also the preview command. */
+    private long tremorSeq;
+
+    /** One tremor under a player: a sand rumble (Rumble.play), sound, particles, and the camera hook. Also the preview command. */
     public Tremor.Plan playTremor(ServerPlayer p, long eventId, double factor, double strength) {
         Tremor.Plan plan = Tremor.plan(strength, factor, cfg);
         ServerLevel level = p.level();
@@ -412,7 +411,9 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         if (crack != null) level.playSound(null, x, y, z, crack, SoundSource.BLOCKS, (float) Math.max(0.5, plan.volume() * 0.7), 0.6f);
         BlockState sand = sandStateUnder(level, p);
         particleReqs.add(new ParticleReq(level, sand, x, y + 0.2, z, plan.particles(), plan.radius() * 0.4, 0.3, plan.radius() * 0.4, 0.25));
-        ripples.add(new Ripple(eventId, level, p, plan));
+        var h = rumbleFor(eventId, p, plan, eventId * 0x9E3779B97F4A7C15L + (tremorSeq++));
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: tremor rumble S={} radius {} blocks max {}/16 share of columns {} columns drawn {}", fmt(plan.strength()), fmt(plan.radius()), plan.maxSixteenths(), fmt(Tremor.share(plan.strength())), h.columns());
+        for (String n : h.notes()) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: tremor rumble: {}", n);
         TremorFx.onTremor(p, strength);
         return plan;
     }
@@ -450,156 +451,37 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         }
     }
 
-    private boolean budgetLogged, blockBudgetLogged;
+    private boolean budgetLogged;
 
-    /** One ripple of fake blocks: the columns round the player and what is shown on each. Never a real edit; every block shown is restored. */
-    private final class Ripple {
-        final long eventId;
-        final ServerLevel level;
-        final Tremor.Plan plan;
-        final double cx, cz;
-        final int ticks;
-        int tick;
-        final List<int[]> cols = new ArrayList<>();   // {x, z, surfaceY}
-        final List<Double> dist = new ArrayList<>();
-        final int[] shown;
-        final Tremor.FakeBlocks fake = new Tremor.FakeBlocks();
-        final Map<Long, BlockState> states = new HashMap<>();
-        final Set<UUID> sentTo = new HashSet<>();
+    /** The sand rumbles of the tremors of each event (stopped when the event ends; the rumble itself ends after one second). */
+    private final Map<Long, List<com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Handle>> rumbles = new HashMap<>();
 
-        Ripple(long eventId, ServerLevel level, ServerPlayer p, Tremor.Plan plan) {
-            this.eventId = eventId;
-            this.level = level;
-            this.plan = plan;
-            this.cx = p.getX();
-            this.cz = p.getZ();
-            this.ticks = cfg.tremorRippleTicks;
-            int r = (int) Math.ceil(plan.radius() + Tremor.Ripple.BAND);
-            int px = (int) Math.floor(cx), pz = (int) Math.floor(cz), py = (int) Math.floor(p.getY());
-            for (int dx = -r; dx <= r; dx++) {
-                for (int dz = -r; dz <= r; dz++) {
-                    double d = Math.hypot(px + dx + 0.5 - cx, pz + dz + 0.5 - cz);
-                    if (d < Tremor.Ripple.INNER || d > plan.radius() + Tremor.Ripple.BAND) continue;
-                    int x = px + dx, z = pz + dz;
-                    if (!level.hasChunkAt(new BlockPos(x, py, z))) continue;
-                    for (int y = py + 2; y >= py - 4; y--) {
-                        if (classOf(level, x, y, z) == SandProbe.Cls.SAND && classOf(level, x, y + 1, z) == SandProbe.Cls.AIR) {
-                            cols.add(new int[]{x, z, y});
-                            dist.add(d);
-                            break;
-                        }
-                    }
-                }
-            }
-            shown = new int[cols.size()];
-        }
-
-        /** The raise operations wanted this tick (pos -> state), and the restores (always applied). Returns the raises; restores are done at once. */
-        List<long[]> wanted() {
-            List<long[]> raises = new ArrayList<>();
-            for (int i = 0; i < cols.size(); i++) {
-                int[] c = cols.get(i);
-                int want = Tremor.Ripple.layers(dist.get(i), tick, ticks, plan.radius(), plan.layers());
-                if (want > shown[i]) for (int k = shown[i] + 1; k <= want; k++) raises.add(new long[]{i, k});
-                else if (want < shown[i]) {
-                    for (int k = shown[i]; k > want; k--) restoreAt(new BlockPos(c[0], c[2] + k, c[1]));
-                    shown[i] = want;
-                }
-            }
-            return raises;
-        }
-
-        void raise(long[] op) {
-            int i = (int) op[0], k = (int) op[1];
-            int[] c = cols.get(i);
-            BlockPos pos = new BlockPos(c[0], c[2] + k, c[1]);
-            BlockState st = level.getBlockState(new BlockPos(c[0], c[2], c[1]));
-            if (!sandSet.contains(st.getBlock())) st = net.minecraft.world.level.block.Blocks.SAND.defaultBlockState();
-            sendToViewers(pos, st);
-            shown[i] = Math.max(shown[i], k);
-            fake.show(pos.asLong(), UUID.randomUUID());
-            states.put(pos.asLong(), st);
-            lastBlocksSent++;
-        }
-
-        void restoreAt(BlockPos pos) {
-            sendReal(pos);
-            fake.restore(pos.asLong());
-            states.remove(pos.asLong());
-        }
-
-        void sendToViewers(BlockPos pos, BlockState st) {
-            ClientboundBlockUpdatePacket pk = new ClientboundBlockUpdatePacket(pos, st);
-            double vd2 = cfg.tremorViewDistance * cfg.tremorViewDistance;
-            for (ServerPlayer v : level.players()) {
-                if (v.distanceToSqr(cx, v.getY(), cz) > vd2) continue;
-                v.connection.send(pk);
-                sentTo.add(v.getUUID());
-            }
-        }
-
-        void sendReal(BlockPos pos) {
-            if (!level.hasChunkAt(pos)) return;
-            ClientboundBlockUpdatePacket pk = new ClientboundBlockUpdatePacket(level, pos);
-            for (UUID id : sentTo) {
-                ServerPlayer v = online.get(id);
-                if (v != null && v.level() == level) v.connection.send(pk);
-            }
-        }
-
-        /** Restores everything that is still shown. Returns how many. */
-        int cancel() {
-            return fake.restoreAll(l -> sendReal(BlockPos.of(l)));
-        }
-    }
-
-    private void stepRipples() {
-        // the raises of every ripple, thinned by one ratio when over the budget (restores are never thinned; nobody drops to zero)
-        List<List<long[]>> wants = new ArrayList<>();
-        int total = 0;
-        for (Ripple r : ripples) {
-            List<long[]> w = r.wanted();
-            wants.add(w);
-            total += w.size();
-        }
-        double ratio = Tremor.ratio(total, cfg.tremorBlockBudgetPerTick);
-        if (ratio < 1 && !blockBudgetLogged) {
-            blockBudgetLogged = true;
-            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: tremor fake blocks over the budget ({} wanted, {} allowed per tick): every ripple thinned by one ratio {} (none below 1)", total, cfg.tremorBlockBudgetPerTick, fmt(ratio));
-        }
-        int idx = 0;
-        for (Iterator<Ripple> it = ripples.iterator(); it.hasNext(); idx++) {
-            Ripple r = it.next();
-            List<long[]> w = wants.get(idx);
-            int n = Tremor.thin(w.size(), ratio);
-            for (int k = 0; k < n; k++) r.raise(w.get(k));
-            r.tick++;
-            if (r.tick > r.ticks) {
-                r.cancel();   // the last frame is flat: everything left is restored
-                it.remove();
-            }
-        }
-    }
-
-    private int cancelRipples(long eventId) {
+    private int stopRumbles(long eventId) {
+        List<com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Handle> l = rumbles.remove(eventId);
         int n = 0;
-        for (Iterator<Ripple> it = ripples.iterator(); it.hasNext(); ) {
-            Ripple r = it.next();
-            if (r.eventId == eventId) { n += r.cancel(); it.remove(); }
-        }
+        if (l != null) for (var h : l) if (h.running()) { h.stop(); n++; }
         return n;
     }
 
-    private void cancelAllRipples() {
-        for (Ripple r : ripples) r.cancel();
-        ripples.clear();
+    private void stopAllRumbles() {
+        for (long id : new ArrayList<>(rumbles.keySet())) stopRumbles(id);
     }
 
-    /** Fake blocks currently shown by all ripples (for the status command and the smoke test). */
-    public int fakeBlocksShown() {
-        int n = 0;
-        for (Ripple r : ripples) n += r.fake.positions().size();
-        return n;
+    /** The tremor rumble of one player: a Rumble.play centred on them (see {@link #playTremor}). */
+    private com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Handle rumbleFor(long eventId, ServerPlayer p, Tremor.Plan plan, long seed) {
+        ServerLevel level = p.level();
+        List<ServerPlayer> viewers = new ArrayList<>();
+        viewers.add(p);
+        double vd2 = cfg.tremorViewDistance * cfg.tremorViewDistance;
+        for (ServerPlayer v : level.players()) if (v != p && v.distanceToSqr(p.getX(), v.getY(), p.getZ()) <= vd2) viewers.add(v);
+        for (ServerPlayer v : extra) if (v != p && v.level() == level && !viewers.contains(v) && v.distanceToSqr(p.getX(), v.getY(), p.getZ()) <= vd2) viewers.add(v);
+        final double s = plan.strength();
+        var params = com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Params.of(plan.radius(), Tremor.RUMBLE_SECONDS).withMax(plan.maxSixteenths()).withSeed(seed)
+                .withStrength(t -> s).withShare(Tremor::share);
+        var h = com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.play(level, p.getX(), p.getZ(), params, viewers);
+        rumbles.computeIfAbsent(eventId, k -> new ArrayList<>()).add(h);
+        rumbles.get(eventId).removeIf(x -> !x.running());
+        return h;
     }
 
     // ---- helpers ----

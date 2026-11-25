@@ -38,7 +38,7 @@ class Prompt13TextTest {
         for (String k : new String[]{"AggroThreshold", "MinGainSpeed", "AggroMultiplierWalk", "AggroMultiplierSprint", "AggroMultiplierSprintJump", "AggroMultiplierMax", "StillDecayPerSecond",
                 "OffSandDecayMultiplier", "TeleportSpeed", "SandBlocks", "SandTolerance", "ShallowPenalty", "ShallowLogSeconds", "DepthShallowMax", "DepthSmallMax", "DepthMediumMax", "DepthLargeMax",
                 "StalkExtraSeconds", "AttackSeconds", "GroupRadius", "TremorMinSeconds", "TremorMaxSeconds", "TremorViewDistance", "BuildUpFraction", "BuildUpMaxParticlesPerSecond",
-                "TremorParticleBudgetPerTick", "TremorBlockBudgetPerTick"})
+                "TremorParticleBudgetPerTick", "RumbleBlockBudgetPerTick", "RumbleMaxSixteenths", "TremorRadius", "RoarDistance", "RoarRangeMargin", "RoarFarPitch"})
             assertTrue(all.contains(k + "="), k);
         assertEquals(java.util.List.of("islandcraft_dunesofarrakis:dune_sand", "minecraft:sand", "minecraft:red_sand"), new HuntConfig().sandBlocks);
     }

@@ -56,12 +56,20 @@ public final class HuntConfigSpec {
     static final ModConfigSpec.DoubleValue BUILD_UP_FRACTION = d("BuildUpFraction", 0.5, 0.01, 1, "The last fraction of the stalk in which the continuous build-up runs.");
     static final ModConfigSpec.DoubleValue BUILD_UP_MAX = d("BuildUpMaxParticlesPerSecond", 60, 0, 100000, "Sand grains per second round a player's feet at the end of the stalk (full size factor).");
     static final ModConfigSpec.IntValue PARTICLE_BUDGET = i("TremorParticleBudgetPerTick", 400, 1, 100000, "Particles of tremors and build-up per tick for the whole server (every player thinned by one ratio when over).");
-    static final ModConfigSpec.IntValue BLOCK_BUDGET = i("TremorBlockBudgetPerTick", 600, 1, 100000, "Fake block updates of tremors per tick for the whole server (every player thinned by one ratio when over).");
-    static final ModConfigSpec.DoubleValue RIPPLE_RADIUS = d("TremorRippleRadius", 12, 2.5, 64, "Ripple radius (blocks) at strength 1 and a huge worm.");
-    static final ModConfigSpec.IntValue RIPPLE_LAYERS = i("TremorRippleLayers", 2, 1, 4, "Ripple height (fake layers of sand) at strength 1.");
     static final ModConfigSpec.IntValue TREMOR_PARTICLES = i("TremorParticles", 40, 1, 10000, "Particles of one tremor at strength 1 and a huge worm.");
     static final ModConfigSpec.DoubleValue TREMOR_VOLUME = d("TremorSoundVolume", 3.0, 0.1, 10, "Sound volume of a tremor at strength 1 and a huge worm (range = 16 x volume x size factor).");
-    static final ModConfigSpec.IntValue RIPPLE_TICKS = i("TremorRippleTicks", 20, 4, 200, "How long a ripple lasts in ticks.");
+    static final ModConfigSpec.IntValue RUMBLE_MAX = i("RumbleMaxSixteenths", 8, 1, 15, "The most a sand column rises or sinks in the rumble, in sixteenths of a block (at most 15).");
+    static final ModConfigSpec.DoubleValue RUMBLE_PULSE = d("RumblePulseSeconds", 1.0, 0.6, 10, "Each column starts one pulse in every period of this length (at least 0.6 s so pulses never overlap).");
+    static final ModConfigSpec.DoubleValue RUMBLE_EDGE = d("RumbleEdgeWeight", 0.25, 0, 1, "The strength weight at the edge of a rumble (1 at the centre, falling linearly).");
+    static final ModConfigSpec.DoubleValue RUMBLE_MARGIN = d("RumbleViewMargin", 32, 0, 512, "Players within radius + this many blocks of a rumble see it (when it is played for everyone nearby).");
+    static final ModConfigSpec.IntValue RUMBLE_BUDGET = i("RumbleBlockBudgetPerTick", 600, 1, 100000, "Fake cell updates of rumbles per tick for the whole server (every event thinned by one ratio when over, none starved).");
+    static final ModConfigSpec.IntValue RUMBLE_DROPS = i("RumbleDropSteps", 2, 1, 4, "Descent steps at the start of a pulse.");
+    static final ModConfigSpec.DoubleValue RUMBLE_STEP = d("RumbleStepSeconds", 0.06, 0.02, 0.5, "Length of one descent step.");
+    static final ModConfigSpec.DoubleValue RUMBLE_SWING = d("RumbleSwingSeconds", 0.09, 0.03, 0.5, "Length of one swing of the rebound (plus or minus 25 percent).");
+    static final ModConfigSpec.DoubleValue TREMOR_RADIUS = d("TremorRadius", 6, 1, 64, "Radius (blocks) of the sand rumble of one stalk tremor at a huge worm; smaller worms scale it by their size factor (at least 3).");
+    static final ModConfigSpec.DoubleValue ROAR_MARGIN = d("RoarRangeMargin", 1.15, 1, 4, "The roar volume is chosen so that the range (16 x volume) reaches the trigger player with this margin.");
+    static final ModConfigSpec.DoubleValue ROAR_PITCH = d("RoarFarPitch", 0.9, 0.5, 1.5, "The pitch of the distant roar is the crash roar pitch times this.");
+    static final ModConfigSpec.DoubleValue[] ROAR_DIST = new ModConfigSpec.DoubleValue[]{d("RoarDistance.small", 50, 5, 1000, "Distance (blocks) of the roar from the trigger player, W8 worm."), d("RoarDistance.medium", 70, 5, 1000, "W16 worm."), d("RoarDistance.large", 90, 5, 1000, "W32 worm."), d("RoarDistance.huge", 110, 5, 1000, "W48 worm.")};
     static {
         B.pop();
     }
@@ -130,12 +138,20 @@ public final class HuntConfigSpec {
             c.buildUpFraction = BUILD_UP_FRACTION.get();
             c.buildUpMaxParticlesPerSecond = BUILD_UP_MAX.get();
             c.tremorParticleBudgetPerTick = PARTICLE_BUDGET.get();
-            c.tremorBlockBudgetPerTick = BLOCK_BUDGET.get();
-            c.tremorRippleRadius = RIPPLE_RADIUS.get();
-            c.tremorRippleLayers = RIPPLE_LAYERS.get();
             c.tremorParticles = TREMOR_PARTICLES.get();
             c.tremorSoundVolume = TREMOR_VOLUME.get();
-            c.tremorRippleTicks = RIPPLE_TICKS.get();
+            c.rumbleMaxSixteenths = RUMBLE_MAX.get();
+            c.rumblePulseSeconds = RUMBLE_PULSE.get();
+            c.rumbleEdgeWeight = RUMBLE_EDGE.get();
+            c.rumbleViewMargin = RUMBLE_MARGIN.get();
+            c.rumbleBlockBudgetPerTick = RUMBLE_BUDGET.get();
+            c.rumbleDropSteps = RUMBLE_DROPS.get();
+            c.rumbleStepSeconds = RUMBLE_STEP.get();
+            c.rumbleSwingSeconds = RUMBLE_SWING.get();
+            c.tremorRadius = TREMOR_RADIUS.get();
+            c.roarRangeMargin = ROAR_MARGIN.get();
+            c.roarFarPitch = ROAR_PITCH.get();
+            for (int s = 0; s < 4; s++) c.roarDistance[s] = ROAR_DIST[s].get();
             for (int t = 0; t < 4; t++) c.strikeWeights[t] = WEIGHT[t].get();
             for (int s = 0; s < 4; s++) { c.crestAhead[s] = AHEAD[s].get(); c.crestBehind[s] = BEHIND[s].get(); c.crestTolerance[s] = TOL[s].get(); }
             for (int t = 0; t < 4; t++) for (int s = 0; s < 4; s++) c.devourSeconds[t][s] = DEVOUR[t][s].get();

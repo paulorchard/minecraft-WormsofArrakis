@@ -86,6 +86,7 @@ final class TestCommand {
         //   engulf  exposed=2 lean=7 hold=0.5 speed gravity=12 pause=1.5 loop mouth
         // A bare number keeps its old meaning by position (crest: height, speed; emerge: n, angle, speed, hold; crash: height; engulf: exposed).
         com.paulorchard.islandcraft.wormsofarrakis.hunt.HuntCommands.attach(root);
+        com.paulorchard.islandcraft.wormsofarrakis.rumble.RumbleCommands.attach(root);
         root.then(Commands.literal("moves").executes(ctx -> {
             for (String line : MoveOptions.movesText()) notice(ctx, line);
             return MoveOptions.MOVES.size();

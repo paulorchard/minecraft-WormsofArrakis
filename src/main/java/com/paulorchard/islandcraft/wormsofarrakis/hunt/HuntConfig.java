@@ -34,14 +34,13 @@ public final class HuntConfig {
     public double buildUpFraction = 0.5;
     public double buildUpMaxParticlesPerSecond = 60;
     public int tremorParticleBudgetPerTick = 400;
-    public int tremorBlockBudgetPerTick = 600;
-    /** The ripple radius (blocks), the ripple height (layers), the particles per tremor and the sound volume at strength 1 and the size factor 1. */
-    public double tremorRippleRadius = 12;
-    public int tremorRippleLayers = 2;
+    // prompt 15: the sand rumble, the tremor radius and the distant roar
+    public int rumbleMaxSixteenths = 8, rumbleBlockBudgetPerTick = 600, rumbleDropSteps = 2;
+    public double rumblePulseSeconds = 1.0, rumbleEdgeWeight = 0.25, rumbleViewMargin = 32, rumbleStepSeconds = 0.06, rumbleSwingSeconds = 0.09, tremorRadius = 6;
+    public double[] roarDistance = {50, 70, 90, 110};
+    public double roarRangeMargin = 1.15, roarFarPitch = 0.9;
     public int tremorParticles = 40;
     public double tremorSoundVolume = 3.0;
-    /** The ripple lasts this many ticks (1 s). */
-    public int tremorRippleTicks = 20;
 
     // strike (prompt 14)
     /** The odds of the four types, indexed by StrikeType (crest, crash, emerge, engulf); rescaled over the available ones. */
@@ -70,11 +69,13 @@ public final class HuntConfig {
         l.add("StalkExtraSeconds=" + stalkExtraSeconds + " AttackSeconds=" + attackSeconds + " GroupRadius=" + groupRadius);
         l.add("TremorMinSeconds=" + tremorMinSeconds + " TremorMaxSeconds=" + tremorMaxSeconds + " TremorViewDistance=" + tremorViewDistance);
         l.add("BuildUpFraction=" + buildUpFraction + " BuildUpMaxParticlesPerSecond=" + buildUpMaxParticlesPerSecond);
-        l.add("TremorParticleBudgetPerTick=" + tremorParticleBudgetPerTick + " TremorBlockBudgetPerTick=" + tremorBlockBudgetPerTick);
-        l.add("TremorRippleRadius=" + tremorRippleRadius + " TremorRippleLayers=" + tremorRippleLayers + " TremorParticles=" + tremorParticles + " TremorSoundVolume=" + tremorSoundVolume + " TremorRippleTicks=" + tremorRippleTicks);
+        l.add("TremorParticleBudgetPerTick=" + tremorParticleBudgetPerTick + "");
+        l.add("TremorParticles=" + tremorParticles + " TremorSoundVolume=" + tremorSoundVolume);
         l.add("StrikeWeights crest=" + strikeWeights[0] + " crash=" + strikeWeights[1] + " emerge=" + strikeWeights[2] + " engulf=" + strikeWeights[3] + " StrikeYawMode=" + strikeYawMode + " ScanColumnsPerTick=" + scanColumnsPerTick);
         l.add("CrestAhead=" + java.util.Arrays.toString(crestAhead) + " CrestBehind=" + java.util.Arrays.toString(crestBehind) + " CrestTolerance=" + java.util.Arrays.toString(crestTolerance) + " (small, medium, large, huge)");
         String[] mv = {"crest", "crash", "emerge", "engulf"}, sz = {"small", "medium", "large", "huge"};
+        l.add("RumbleMaxSixteenths=" + rumbleMaxSixteenths + " RumblePulseSeconds=" + rumblePulseSeconds + " RumbleEdgeWeight=" + rumbleEdgeWeight + " RumbleViewMargin=" + rumbleViewMargin + " RumbleBlockBudgetPerTick=" + rumbleBlockBudgetPerTick + " RumbleDropSteps=" + rumbleDropSteps + " RumbleStepSeconds=" + rumbleStepSeconds + " RumbleSwingSeconds=" + rumbleSwingSeconds + " TremorRadius=" + tremorRadius);
+        l.add("RoarDistance=" + java.util.Arrays.toString(roarDistance) + " (small, medium, large, huge) RoarRangeMargin=" + roarRangeMargin + " RoarFarPitch=" + roarFarPitch);
         for (int t = 0; t < 4; t++) for (int s = 0; s < 4; s++) l.add("DevourSeconds." + mv[t] + "." + sz[s] + "=" + devourSeconds[t][s]);
         return l;
     }

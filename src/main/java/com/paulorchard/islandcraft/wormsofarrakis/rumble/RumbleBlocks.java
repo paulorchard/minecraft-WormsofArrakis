@@ -22,6 +22,7 @@ public final class RumbleBlocks {
     public static void init(IEventBus modBus) {
         BLOCKS.register(modBus);
         NeoForge.EVENT_BUS.register(RumbleGuard.class);
+        RumbleManager.init();
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] rumble: block {}:arrakis_rumble_sand registered (levels 1 to 15, no item, never in a real world; a leaked one becomes air when its chunk loads)", WormsOfArrakis.MOD_ID);
     }
 }

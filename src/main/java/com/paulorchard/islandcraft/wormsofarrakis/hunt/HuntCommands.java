@@ -201,7 +201,7 @@ public final class HuntCommands {
         a.stateNow(p);
         double strengthS = s;   // the strength S of the formula (0.3 at the start of a stalk, 1.0 at its end)
         Tremor.Plan plan = a.playTremor(p, 0, f, strengthS);
-        say(ctx, tr("preview.done", HuntAdapter.fmt(strengthS), HuntAdapter.trim(w), HuntAdapter.fmt(f), HuntAdapter.fmt(plan.radius()), plan.layers(), plan.particles(), HuntAdapter.fmt(plan.volume()), HuntAdapter.fmt(plan.range())));
+        say(ctx, tr("preview.done", HuntAdapter.fmt(strengthS), HuntAdapter.trim(w), HuntAdapter.fmt(f), HuntAdapter.fmt(plan.radius()), plan.maxSixteenths(), plan.particles(), HuntAdapter.fmt(plan.volume()), HuntAdapter.fmt(plan.range())));
         return 1;
     }
 }

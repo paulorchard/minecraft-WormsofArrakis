@@ -504,11 +504,11 @@ class Prompt13Test {
         assertEquals(60, Tremor.buildUpRate(1.0, 1, c), 1e-9);
         assertEquals(15, Tremor.buildUpRate(1.0, 0.25, c), 1e-9, "a small worm: a quarter");
         Tremor.Plan small = Tremor.plan(1.0, 0.25, c), huge = Tremor.plan(1.0, 1.0, c), half = Tremor.plan(0.5, 1.0, c);
-        assertEquals(huge.radius() * 0.25, small.radius(), 1e-9);
+        assertEquals(Math.max(Tremor.MIN_RADIUS, huge.radius() * 0.25), small.radius(), 1e-9, "radius = TremorRadius x factor, at least 3 (prompt 15)");
         assertEquals(huge.particles() / 4, small.particles(), 1);
         assertEquals(huge.volume() * 0.25, small.volume(), 1e-9);
         assertEquals(16 * small.volume(), small.range(), 1e-9, "range = 16 x volume");
-        assertTrue(half.radius() < huge.radius() && half.volume() < huge.volume() && half.particles() < huge.particles());
+        assertTrue(half.radius() == huge.radius() && half.volume() < huge.volume() && half.particles() < huge.particles());
         assertTrue(Tremor.plan(0.3, 0.25, c).radius() >= Tremor.MIN_RADIUS);
     }
 
@@ -556,24 +556,19 @@ class Prompt13Test {
     }
 
     @Test
-    void theRippleSettlesToZeroAndFakeBlocksAreAlwaysRestored() {
+    void theTremorRumbleMapsStrengthAndSizeToRadiusAmplitudeAndShare() {
+        // prompt 15 part 3 (replaces the old ripple test): radius = TremorRadius x size factor (at least 3), the most a column moves = RumbleMaxSixteenths x (0.5 + 0.5 x factor), share of pulsing columns = S squared
         HuntConfig c = new HuntConfig();
-        int ticks = c.tremorRippleTicks;
-        int maxSeen = 0;
-        for (int tick = 0; tick <= ticks; tick++) for (double d = 0; d < 20; d += 0.5) maxSeen = Math.max(maxSeen, Tremor.Ripple.layers(d, tick, ticks, 12, 2));
-        assertEquals(2, maxSeen, "the full height is reached");
-        for (double d = 0; d < 20; d += 0.25) {
-            assertEquals(0, Tremor.Ripple.layers(d, ticks, ticks, 12, 2), "the last frame is flat");
-            assertEquals(0, Tremor.Ripple.layers(1.0, 5, ticks, 12, 2), "the feet stay on real blocks");
-        }
-        Tremor.FakeBlocks fb = new Tremor.FakeBlocks();
-        for (long p = 0; p < 50; p++) fb.show(p, u(1));
-        fb.restore(3);
-        Set<Long> sentReal = new HashSet<>();
-        int n = fb.restoreAll(sentReal::add);
-        assertEquals(49, n);
-        assertEquals(49, sentReal.size());
-        assertFalse(fb.any(), "an early end restores everything");
+        var small = Tremor.plan(1.0, com.paulorchard.islandcraft.wormsofarrakis.fx.SizeFactor.of(8), c);
+        var huge = Tremor.plan(1.0, com.paulorchard.islandcraft.wormsofarrakis.fx.SizeFactor.of(48), c);
+        assertEquals(3.0, small.radius(), 1e-9, "W8: 6 x 0.25 = 1.5, raised to the minimum 3");
+        assertEquals(6.0, huge.radius(), 1e-9, "W48: 6 x 1.0");
+        assertEquals(5, small.maxSixteenths(), "8 x (0.5 + 0.125) = 5");
+        assertEquals(8, huge.maxSixteenths());
+        assertEquals(0.09, Tremor.share(0.3), 1e-9);
+        assertEquals(1.0, Tremor.share(1.0), 1e-9);
+        assertEquals(huge.radius(), Tremor.plan(0.3, 1.0, c).radius(), 1e-9, "the radius does not depend on S: S scales the depth and the share of columns");
+        assertEquals(1.0, Tremor.RUMBLE_SECONDS, 1e-9);
     }
 
     @Test
@@ -585,7 +580,7 @@ class Prompt13Test {
             for (double st : new double[]{0.3, 1.0}) {
                 var p = com.paulorchard.islandcraft.wormsofarrakis.hunt.Tremor.plan(st, f, c);
                 int cols = (int) Math.round(Math.PI * (p.radius() * p.radius() - 1.5 * 1.5));
-                b.append(String.format(java.util.Locale.ROOT, "%s W%.0f stalk %.0f s: S=%.1f radius %.2f layers %d particles %d volume %.2f range %.0f blocks, ripple columns about %d%n", s.label, s.width, s.width + c.stalkExtraSeconds, st, p.radius(), p.layers(), p.particles(), p.volume(), p.range(), cols));
+                b.append(String.format(java.util.Locale.ROOT, "%s W%.0f stalk %.0f s: S=%.1f radius %.2f max %d/16 share %.2f particles %d volume %.2f range %.0f blocks, rumble columns about %d%n", s.label, s.width, s.width + c.stalkExtraSeconds, st, p.radius(), p.maxSixteenths(), Tremor.share(st), p.particles(), p.volume(), p.range(), cols));
             }
             b.append(String.format(java.util.Locale.ROOT, "%s: build-up at the end of the stalk %.0f grains per second per player (%.0f at the half)%n", s.label, com.paulorchard.islandcraft.wormsofarrakis.hunt.Tremor.buildUpRate(1.0, f, c), com.paulorchard.islandcraft.wormsofarrakis.hunt.Tremor.buildUpRate(0.75, f, c)));
         }

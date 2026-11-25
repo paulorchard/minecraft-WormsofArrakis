@@ -39,7 +39,7 @@ public final class HuntTexts {
         EN.put("stop.done", "Stopped %s event(s); the lists are zeroed.");
         EN.put("ignore.on", "%s is now ignored by the worms (testing).");
         EN.put("ignore.off", "%s is no longer ignored.");
-        EN.put("preview.done", "Tremor preview: strength %s, W%s (size factor %s): radius %s blocks, %s layer(s), %s particles, volume %s, range %s blocks");
+        EN.put("preview.done", "Tremor preview: strength %s, W%s (size factor %s): radius %s blocks, sand moves up to %s/16 per column, %s particles, volume %s, range %s blocks");
         EN.put("bad.size", "size must be small, medium, large or huge, not %s");
         EN.put("bad.player", "no such player: %s");
         EN.put("bad.range", "%s is outside %s; clamped to %s");
