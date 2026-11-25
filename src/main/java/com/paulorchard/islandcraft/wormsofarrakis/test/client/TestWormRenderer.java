@@ -97,6 +97,7 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
     private static final class MoveCache {
         String key;
         double s = Double.NaN;
+        long swayTick;
         WormSkin skin;
         int exposed;
         double[] heights;
@@ -167,16 +168,18 @@ public class TestWormRenderer extends GeoEntityRenderer<TestWormEntity, EntityRe
         Integer id = state.getGeckolibData(ID);
         MoveCache c = MOVE_CACHE.get(id);
         String key = spec.serialize() + "|" + TestFlags.visualKey();
-        boolean rebuild = c == null || c.s != s || !key.equals(c.key) || TestFlags.worldSurface;
+        long swayTick = MoveFactory.swayParams(spec).on() ? (long) Math.floor(tau * 20) : 0;   // prompt 11: the sway moves the rings every tick, also while the head stands still
+        boolean rebuild = c == null || c.s != s || !key.equals(c.key) || TestFlags.worldSurface || c.swayTick != swayTick;
         long t0 = System.nanoTime();
         if (rebuild) {
             c = new MoveCache();
             c.key = key;
             c.s = s;
+            c.swayTick = swayTick;
             WormPose pose = m.pose(s);
             ShingleMath.Options opt = visual(ShingleMath.Options.defaults(ScaleMath.LIP_LENGTH, linerMode > 0), id)
                     .withLinerColor(linerMode >= 1.5 ? ShingleMath.LINER_DARK : ShingleMath.LINER_TINT);
-            c.skin = WormSkin.build(pose, n, m.r0, surfaceFor(state), opt, 0.0, MoveFactory.tailSpec(spec), m.width);
+            c.skin = WormSkin.build(pose, n, m.r0, surfaceFor(state), opt, 0.0, MoveFactory.tailSpec(spec), m.width, MoveFactory.swayOffsets(spec, m, tau, pose.joints));
             c.exposed = pose.exposedBody(0);
             c.heights = m.headHeights(s);
             if (MOVE_CACHE.size() > 64) MOVE_CACHE.clear();

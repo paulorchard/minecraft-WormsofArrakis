@@ -120,7 +120,14 @@ public final class MoveFactory {
             case 35 -> 0.3;    // taillen
             case 36 -> 0.12;   // tailnub
             case 37 -> 1.0;    // tailcurve
-            default -> 1;      // p27..p31 fx options, p33 xeruption, p34 tail on
+            case 39, 40 -> 0.04;   // swayamp, swayamp2
+            case 41 -> 14;         // swaywave
+            case 42 -> 21;         // swaywave2
+            case 43 -> 0.6;        // swayhz
+            case 44 -> 0.45;       // swayhz2
+            case 45 -> 3.0;        // swayfade
+            case 46 -> 0.25;       // swayidle
+            default -> 1;      // p27..p31 fx options, p33 xeruption, p34 tail on, p38 sway on
         };
     }
 
@@ -150,6 +157,40 @@ public final class MoveFactory {
         p[36] = t.nub();
         p[37] = t.curve();
         return new WormSpec(base.kind(), base.mode(), p);
+    }
+
+    /** Prompt 11: p38 sway (1/0), p39 swayamp, p40 swayamp2, p41 swaywave, p42 swaywave2, p43 swayhz, p44 swayhz2, p45 swayfade, p46 swayidle. A spec with the defaults keeps its shorter length. */
+    public static WormSpec withSway(WormSpec base, com.paulorchard.islandcraft.wormsofarrakis.path.Sway.Params s) {
+        if (s.isDefault()) return base;
+        double[] p = grow(base, 47);
+        p[38] = s.on() ? 1 : 0;
+        p[39] = s.ampLR();
+        p[40] = s.ampFB();
+        p[41] = s.waveLR();
+        p[42] = s.waveFB();
+        p[43] = s.hzLR();
+        p[44] = s.hzFB();
+        p[45] = s.fade();
+        p[46] = s.idle();
+        return new WormSpec(base.kind(), base.mode(), p);
+    }
+
+    /** The sway of a spec (the defaults when the spec is short): on for every move. */
+    public static com.paulorchard.islandcraft.wormsofarrakis.path.Sway.Params swayParams(WormSpec s) {
+        return new com.paulorchard.islandcraft.wormsofarrakis.path.Sway.Params(s.p(38, 1) > 0, s.p(39, 0.04), s.p(40, 0.04), s.p(41, 14), s.p(42, 21), s.p(43, 0.6), s.p(44, 0.45), s.p(45, 3.0), s.p(46, 0.25));
+    }
+
+    /**
+     * The sway offsets of every joint of the worm at script time tau (null when the sway is off): the phase runs on the continuous script time, the envelope on the loop time
+     * (it is 1 before the breach of every loop). tBreach = the breach anchor of FxAnchors (a crest: the head breach); a move without a breach has the full sway.
+     */
+    public static double[][] swayOffsets(WormSpec s, Moves.Move m, double tau, double[][] joints) {
+        com.paulorchard.islandcraft.wormsofarrakis.path.Sway.Params p = swayParams(s);
+        if (!p.on()) return null;
+        double loopT = tau % m.cycle;
+        if (loopT < 0) loopT += m.cycle;
+        double breach = com.paulorchard.islandcraft.wormsofarrakis.fx.FxAnchors.of(m, closeTime(s), closeEnd(s)).breach();
+        return com.paulorchard.islandcraft.wormsofarrakis.path.Sway.offsets(joints, m.r0, tau, loopT, breach, p);
     }
 
     /** The tail of a spec: only a crest has one (the other moves get the off tail); the defaults when the spec is short. */

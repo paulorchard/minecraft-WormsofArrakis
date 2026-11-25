@@ -529,6 +529,9 @@ final class TestCommand {
         } else {
             WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} fx: off", m.label());
         }
+        var sw = MoveFactory.swayParams(s);
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} sway: {} ampLR={} ampFB={} (fractions of r0={}: at most {} blocks, no ripple of the radius) waveLR={} waveFB={} rings, hzLR={} hzFB={}, fade={}s idle={}; a visual offset only: path, joints, timing and effects are unchanged",
+                m.label(), sw.on() ? "on" : "off", sw.ampLR(), sw.ampFB(), String.format("%.2f", m.r0), String.format("%.2f", sw.maxOffset(m.r0)), sw.waveLR(), sw.waveFB(), sw.hzLR(), sw.hzFB(), sw.fade(), sw.idle());
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} light: mode={} (probe = the maximum of block and sky light at up to {} points along the exposed body, recomputed every {} ticks, moving at most {} level per tick; vanilla = the light at the entity origin; full = 15/15)",
                 m.label(), MoveFactory.lightMode(s).label(), com.paulorchard.islandcraft.wormsofarrakis.light.LightMath.LIGHT_SAMPLES, com.paulorchard.islandcraft.wormsofarrakis.light.LightMath.SAMPLE_EVERY,
                 com.paulorchard.islandcraft.wormsofarrakis.light.LightMath.MAX_STEP);

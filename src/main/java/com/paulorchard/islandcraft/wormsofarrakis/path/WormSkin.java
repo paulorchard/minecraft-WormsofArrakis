@@ -43,15 +43,24 @@ public final class WormSkin {
         return build(pose, n, r0, surface, options, mouthOpenDeg, null, 0);
     }
 
+    public static WormSkin build(WormPose pose, int n, double r0, SurfaceProvider surface, ShingleMath.Options options, double mouthOpenDeg, TailMath.Spec tailSpec, double width) {
+        return build(pose, n, r0, surface, options, mouthOpenDeg, tailSpec, width, null);
+    }
+
     /**
      * As above with the tail of a crest (prompt 10): from joint n0 = round(segments x (1 - taillen)) the body is not the shingle skin but the tapering frusta of
      * {@link TailMath} (and the cap); with a null or an off tail it is exactly the old skin.
      */
-    public static WormSkin build(WormPose pose, int n, double r0, SurfaceProvider surface, ShingleMath.Options options, double mouthOpenDeg, TailMath.Spec tailSpec, double width) {
+    /**
+     * As above with the sway of prompt 11: {@code offsets[k]} = {x, y, z} added to the centre of joint k of the chain (and of the tail chain), so every ring, the liner and
+     * the head (the mouth is placed with chain.center[0]) move rigidly with their ring; null = the old geometry byte for byte. The drawn flags and the gaps do not change.
+     */
+    public static WormSkin build(WormPose pose, int n, double r0, SurfaceProvider surface, ShingleMath.Options options, double mouthOpenDeg, TailMath.Spec tailSpec, double width, double[][] offsets) {
         boolean[] drawn = pose.drawn(r0, surface);
         int first = -1, last = -1;
         for (int k = 0; k < drawn.length; k++) if (drawn[k]) { if (first < 0) first = k; last = k; }
         ChainMath chain = pose.chain(r0);
+        shift(chain, offsets);
         if (first < 0) return new WormSkin(pose, chain, drawn, 0, -1, new ShingleMath.Result(), 0, new ShingleMath.Result());
         int from = Math.max(0, first - 1), to = Math.min(pose.segments - 1, last + 1);
         // prompt 08: every ring takes the one uniform roll that puts the upper jaw on top; the mouth itself (shell, throat, teeth) is HeadMouth,
@@ -62,11 +71,18 @@ public final class WormSkin {
             int n0 = TailMath.n0(pose.segments, tailSpec.len());
             if (to >= n0) {
                 toBody = n0 - 1;
-                tail = TailMath.build(pose.chain(TailMath.radii(pose.segments, r0, tailSpec)), pose.segments, width, r0, tailSpec, from, to, options.seed(), options.jitter());
+                ChainMath tc = pose.chain(TailMath.radii(pose.segments, r0, tailSpec));
+                shift(tc, offsets);
+                tail = TailMath.build(tc, pose.segments, width, r0, tailSpec, from, to, options.seed(), options.jitter());
             }
         }
         ShingleMath.Result res = toBody >= from ? ShingleMath.build(chain, n, r0, 1, options.withRoll(HeadMouth.roll(n)), from, toBody) : new ShingleMath.Result();
         return new WormSkin(pose, chain, drawn, from, toBody >= from ? toBody : to, res, 0, tail);
+    }
+
+    private static void shift(ChainMath c, double[][] offsets) {
+        if (offsets == null) return;
+        for (int k = 0; k < c.center.length && k < offsets.length; k++) for (int i = 0; i < 3; i++) c.center[k][i] += offsets[k][i];
     }
 
     /** True when the head ring (segment 0) is part of this skin, i.e. the mouth is to be drawn. */

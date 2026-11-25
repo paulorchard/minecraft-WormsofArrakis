@@ -72,6 +72,15 @@ public final class MoveOptions {
                 new Key("teeth", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the bristles on the mandibles and the throat"),
                 new Key("fx", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the sounds and particles of the sheet (prompts 09 and 10; on a crest the entry and the exit both play)"),
                 new Key("eruption", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the eruption rows of the breach: jets of sand, dust columns, flying sand blocks, the dust bank (prompt 10)"),
+                new Key("sway", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the slow sway of the body: two waves travelling down it, left-right and front-back, strong at the breach and fading to a faint sway (prompt 11); off = the rigid body"),
+                num("swayamp", com.paulorchard.islandcraft.wormsofarrakis.path.Sway.Params.DEFAULT.ampLR(), 0, 0.5, true, "0..0.5", "left-right amplitude as a fraction of the body radius"),
+                num("swayamp2", com.paulorchard.islandcraft.wormsofarrakis.path.Sway.Params.DEFAULT.ampFB(), 0, 0.5, true, "0..0.5", "front-back amplitude as a fraction of the body radius"),
+                num("swaywave", 14, 3, 40, true, "3..40", "left-right wavelength in rings"),
+                num("swaywave2", 21, 3, 40, true, "3..40", "front-back wavelength in rings"),
+                num("swayhz", 0.6, 0.1, 3, true, "0.1..3", "left-right speed in cycles per second"),
+                num("swayhz2", 0.45, 0.1, 3, true, "0.1..3", "front-back speed in cycles per second"),
+                num("swayfade", 3.0, 0.5, 12, true, "0.5..12", "seconds the sway takes to fade after the breach"),
+                num("swayidle", 0.25, 0, 1, true, "0..1", "the fraction of the sway that stays after the fade"),
                 new Key("light", Type.LIGHT, 0, 0, 2, false, "probe", "probe|vanilla|full", "the light of the worm: probe = the best light along the exposed body (prompt 10); vanilla = the light at the entity origin only; full = 15/15"),
                 new Key("fxsound", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the sounds of the sheet"),
                 new Key("fxparticles", Type.ONOFF, 1, 0, 1, false, "on", "on|off", "the particles of the sheet"),
@@ -273,6 +282,7 @@ public final class MoveOptions {
         FxOptions fx = new FxOptions(fxOn, !"off".equals(givenText.get("fxsound")), !"off".equals(givenText.get("fxparticles")), v.get("fxvol"), v.get("fxcount"), !"off".equals(givenText.get("eruption")), !"off".equals(givenText.get("xeruption")));
         spec = MoveFactory.withFx(spec, fx);
         spec = MoveFactory.withLight(spec, givenText.getOrDefault("light", "probe"));
+        spec = MoveFactory.withSway(spec, new com.paulorchard.islandcraft.wormsofarrakis.path.Sway.Params(!"off".equals(givenText.get("sway")), v.get("swayamp"), v.get("swayamp2"), v.get("swaywave"), v.get("swaywave2"), v.get("swayhz"), v.get("swayhz2"), v.get("swayfade"), v.get("swayidle")));
         if (move.equals("crest")) spec = MoveFactory.withTail(spec, new com.paulorchard.islandcraft.wormsofarrakis.geometry.TailMath.Spec(!"off".equals(givenText.get("tail")), v.get("taillen"), v.get("tailnub"), v.get("tailcurve")));
         return new Parsed(spec, force, mouthOpen, loop, notes, v);
     }
