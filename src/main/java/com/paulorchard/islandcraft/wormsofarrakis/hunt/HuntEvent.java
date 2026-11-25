@@ -29,6 +29,8 @@ public final class HuntEvent {
         default void onPhaseChange(HuntEvent e, Phase from, Phase to) {}
         default void onTick(HuntEvent e) {}
         default void onEnd(HuntEvent e, EndReason reason) {}
+        /** FREEZE is over: the strike starts. The default (no strike runner) finishes it at once; the game adapter runs the move and calls {@link HuntEvent#finishStrike()} when it is over. */
+        default void onStrike(HuntEvent e) { e.finishStrike(); }
         /** A tremor of strength S for one listed player (the camera of a later prompt can use this too). */
         default void onTremor(HuntEvent e, UUID player, double strength, double progress) {}
         /** The continuous build-up of one listed player: {@code count} sand grains this tick (whole number) at the rate per second {@code rate}. */
@@ -53,6 +55,9 @@ public final class HuntEvent {
     private String victimName = "";
     private double victimScore;
     private EndReason endReason;
+    private boolean strikeDone, devoured;
+    private double strikeLimit = Double.MAX_VALUE;
+    private String strikeType = "", strikeDir = "";
 
     public HuntEvent(long id, UUID trigger, String dim, SizeTable.Size size, List<UUID> roster, HuntConfig cfg, Hooks hooks, StrikeHook strike) {
         this.id = id;
@@ -77,18 +82,32 @@ public final class HuntEvent {
     public double victimScore() { return victimScore; }
     public EndReason endReason() { return endReason; }
     public boolean ended() { return phase == Phase.ENDED; }
+    public boolean devoured() { return devoured; }
+    public String strikeType() { return strikeType; }
+    public String strikeDir() { return strikeDir; }
+    /** The victim has been devoured (killed); from now on the victim leaving the list does not cancel the event. */
+    public void markDevoured() { devoured = true; }
+    /** The strike is over (the move has finished): the event ends DONE on the next tick. */
+    public void finishStrike() { strikeDone = true; }
+    /** The longest the event waits for the strike, in seconds from the start of STRIKE (a safety net; the move's own end normally comes first). */
+    public void setStrikeLimit(double seconds) { strikeLimit = seconds; }
+    public void setStrikeInfo(String type, String dir) { strikeType = type; strikeDir = dir; }
     public List<UUID> members() { return new ArrayList<>(members); }
     public boolean has(UUID id) { return members.contains(id); }
     public Tremor.Clock clockOf(UUID id) { return clocks.get(id); }
     /** The fraction of the stalk elapsed, 0 to 1 (1 after it). */
     public double progress() { return phase == Phase.STALKING ? Math.min(1, phaseTime / stalkSeconds) : 1; }
-    public double secondsLeft() { return phase == Phase.STALKING ? Math.max(0, stalkSeconds - phaseTime) : phase == Phase.FREEZE ? Math.max(0, attackSeconds - phaseTime) : 0; }
+    public double secondsLeft() { return phase == Phase.STALKING ? Math.max(0, stalkSeconds - phaseTime) : phase == Phase.FREEZE ? Math.max(0, attackSeconds - phaseTime) : phase == Phase.STRIKE && strikeLimit < Double.MAX_VALUE ? Math.max(0, strikeLimit - phaseTime) : 0; }
 
     /** A member leaves (log-off, death, mode, dimension). Nobody joins later. An empty list ends the event FIZZLED. */
     public void removeMember(UUID id) {
         if (ended() || !members.remove(id)) return;
         clocks.remove(id);
         buildAcc.remove(id);
+        if (phase == Phase.STRIKE) {   // the victim leaving before the devour cancels the strike; after it (the death itself) the move runs on
+            if (id.equals(victim) && !devoured) end(EndReason.FIZZLED);
+            return;
+        }
         if (members.isEmpty() || (phase == Phase.FREEZE && id.equals(victim))) end(EndReason.FIZZLED);   // the victim leaves during the freeze: no strike
     }
 
@@ -139,7 +158,17 @@ public final class HuntEvent {
             }
         } else if (phase == Phase.FREEZE) {
             hooks.onTick(this);
-            if (phaseTime >= attackSeconds - 1e-9) end(EndReason.DONE);
+            if (phaseTime >= attackSeconds - 1e-9) {
+                Phase from = phase;
+                phase = Phase.STRIKE;
+                phaseTime = 0;
+                hooks.onPhaseChange(this, from, phase);
+                hooks.onStrike(this);
+                if (!ended() && strikeDone) end(EndReason.DONE);
+            }
+        } else if (phase == Phase.STRIKE) {
+            hooks.onTick(this);
+            if (strikeDone || phaseTime >= strikeLimit - 1e-9) end(EndReason.DONE);
         }
     }
 

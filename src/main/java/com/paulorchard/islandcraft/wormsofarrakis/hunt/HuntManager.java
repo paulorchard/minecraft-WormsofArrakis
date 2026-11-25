@@ -131,6 +131,7 @@ public final class HuntManager {
         HuntEvent.Hooks bridge = new HuntEvent.Hooks() {
             @Override public void onPhaseChange(HuntEvent e, HuntEvent.Phase from, HuntEvent.Phase to) { listener.onPhaseChange(e, from, to); }
             @Override public void onTick(HuntEvent e) { listener.onTick(e); }
+            @Override public void onStrike(HuntEvent e) { listener.onStrike(e); }
             @Override public void onTremor(HuntEvent e, UUID player, double strength, double progress) { listener.onTremor(e, player, strength, progress); }
             @Override public void onBuildUp(HuntEvent e, UUID player, int count, double rate, double progress) { listener.onBuildUp(e, player, count, rate, progress); }
             @Override public void onEnd(HuntEvent e, HuntEvent.EndReason reason) { release(e, reason); }
@@ -170,6 +171,7 @@ public final class HuntManager {
             aggro.setAggro(u, 0);
             byPlayer.remove(u, e);
         }
+        if (e.victim() != null) { aggro.setAggro(e.victim(), 0); byPlayer.remove(e.victim(), e); }
         events.remove(e.id);
         listener.onEnd(e, reason);
     }

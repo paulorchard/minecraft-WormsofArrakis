@@ -12,6 +12,10 @@ public final class HuntTexts {
 
     public static final String PREFIX = "islandcraft_wormsofarrakis.hunt.";
 
+    /** The death message (the damage type's message id is islandcraft_wormsofarrakis.swallowed; the game looks up death.attack.<id>). */
+    public static final String DEATH_KEY = "death.attack.islandcraft_wormsofarrakis.swallowed";
+    public static final String DEATH_TEXT = "%1$s was swallowed by a sandworm";
+
     public static final Map<String, String> EN = new LinkedHashMap<>();
     static {
         EN.put("status.none", "No hunt events are running.");
@@ -40,5 +44,12 @@ public final class HuntTexts {
         EN.put("bad.player", "no such player: %s");
         EN.put("bad.range", "%s is outside %s; clamped to %s");
         EN.put("bad.width", "W must be 1 to 128");
+        EN.put("status.strike", "  strike: %s, direction %s (%s s left)");
+        EN.put("status.strike_none", "  strike: not chosen yet");
+        EN.put("strike.bad_type", "strike must be crest, crash, emerge or engulf, not %s");
+        EN.put("strike.refused", "%s is not available at %s: %s (add force to run it anyway)");
+        EN.put("strike.forced", "Strike %s will be used at the end of the freeze%s");
+        EN.put("strike.forced_anyway", " (forced although it is not available here: %s)");
+        EN.put("strike.needs_size", "strike needs a size (small, medium, large or huge) so the worm is known");
     }
 }

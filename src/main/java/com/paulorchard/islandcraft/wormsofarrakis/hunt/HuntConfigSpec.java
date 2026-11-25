@@ -44,7 +44,7 @@ public final class HuntConfigSpec {
         B.push("event");
     }
     static final ModConfigSpec.DoubleValue STALK_EXTRA = d("StalkExtraSeconds", 8, 0, 3600, "The stalk lasts the width of the worm plus this many seconds.");
-    static final ModConfigSpec.DoubleValue ATTACK_SECONDS = d("AttackSeconds", 4, 0, 3600, "The attack phase (a placeholder until the strike exists).");
+    static final ModConfigSpec.DoubleValue ATTACK_SECONDS = d("AttackSeconds", 4, 0, 3600, "The freeze: the victim slows to zero over this long, then the strike starts.");
     static final ModConfigSpec.DoubleValue GROUP_RADIUS = d("GroupRadius", 200, 1, 100000, "Players within this horizontal distance of the trigger are put in the list.");
     static {
         B.pop();
@@ -63,6 +63,39 @@ public final class HuntConfigSpec {
     static final ModConfigSpec.DoubleValue TREMOR_VOLUME = d("TremorSoundVolume", 3.0, 0.1, 10, "Sound volume of a tremor at strength 1 and a huge worm (range = 16 x volume x size factor).");
     static final ModConfigSpec.IntValue RIPPLE_TICKS = i("TremorRippleTicks", 20, 4, 200, "How long a ripple lasts in ticks.");
     static {
+        B.pop();
+    }
+
+    static final ModConfigSpec.DoubleValue[] WEIGHT = new ModConfigSpec.DoubleValue[4];
+    static final ModConfigSpec.IntValue[] AHEAD = new ModConfigSpec.IntValue[4], BEHIND = new ModConfigSpec.IntValue[4], TOL = new ModConfigSpec.IntValue[4];
+    static final ModConfigSpec.DoubleValue[][] DEVOUR = new ModConfigSpec.DoubleValue[4][4];
+    static final ModConfigSpec.ConfigValue<String> YAW_MODE;
+    static final ModConfigSpec.IntValue SCAN_COLUMNS;
+    static {
+        HuntConfig def = new HuntConfig();
+        String[] mv = {"crest", "crash", "emerge", "engulf"}, sz = {"small", "medium", "large", "huge"};
+        B.push("strike");
+        B.comment("The odds of the four strike types; rescaled over the types available at the victim's place (crash and emerge always are).").push("StrikeWeights");
+        for (int t = 0; t < 4; t++) WEIGHT[t] = d(mv[t], def.strikeWeights[t], 0, 100000, "Weight of the " + mv[t] + ".");
+        B.pop();
+        B.comment("Crest corridor: sand needed ahead of the victim (blocks), per size (5.2 W).").push("CrestAhead");
+        for (int s = 0; s < 4; s++) AHEAD[s] = i(sz[s], def.crestAhead[s], 1, 10000, "Blocks ahead, " + sz[s] + ".");
+        B.pop();
+        B.comment("Crest corridor: sand needed behind the victim (blocks), per size (2 W).").push("CrestBehind");
+        for (int s = 0; s < 4; s++) BEHIND[s] = i(sz[s], def.crestBehind[s], 0, 10000, "Blocks behind, " + sz[s] + ".");
+        B.pop();
+        B.comment("Crest corridor: how far a sample's top block may differ in height from the victim's ground (blocks), per size (0.25 W).").push("CrestTolerance");
+        for (int s = 0; s < 4; s++) TOL[s] = i(sz[s], def.crestTolerance[s], 0, 1000, "Height tolerance, " + sz[s] + ".");
+        B.pop();
+        YAW_MODE = B.comment("cardinal: crash, emerge and engulf face one of N E S W at random; random: any yaw.").define("StrikeYawMode", "cardinal", o -> "cardinal".equals(o) || "random".equals(o));
+        SCAN_COLUMNS = i("ScanColumnsPerTick", def.scanColumnsPerTick, 1, 100000, "Columns the corridor scan reads per tick (spread over the last quarter of the freeze).");
+        B.comment("Seconds after the move starts at which the mouth encloses the victim and they are killed (derived from the move's own frames; tune here).").push("DevourSeconds");
+        for (int t = 0; t < 4; t++) {
+            B.push(mv[t]);
+            for (int s = 0; s < 4; s++) DEVOUR[t][s] = d(sz[s], def.devourSeconds[t][s], 0, 600, "Devour time of the " + mv[t] + ", " + sz[s] + ".");
+            B.pop();
+        }
+        B.pop();
         B.pop();
     }
 
@@ -103,6 +136,11 @@ public final class HuntConfigSpec {
             c.tremorParticles = TREMOR_PARTICLES.get();
             c.tremorSoundVolume = TREMOR_VOLUME.get();
             c.tremorRippleTicks = RIPPLE_TICKS.get();
+            for (int t = 0; t < 4; t++) c.strikeWeights[t] = WEIGHT[t].get();
+            for (int s = 0; s < 4; s++) { c.crestAhead[s] = AHEAD[s].get(); c.crestBehind[s] = BEHIND[s].get(); c.crestTolerance[s] = TOL[s].get(); }
+            for (int t = 0; t < 4; t++) for (int s = 0; s < 4; s++) c.devourSeconds[t][s] = DEVOUR[t][s].get();
+            c.strikeYawMode = YAW_MODE.get();
+            c.scanColumnsPerTick = SCAN_COLUMNS.get();
             return true;
         } catch (RuntimeException e) {
             return false;   // not loaded yet: the defaults stay

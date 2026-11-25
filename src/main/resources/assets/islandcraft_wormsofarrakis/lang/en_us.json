@@ -24,5 +24,13 @@
   "islandcraft_wormsofarrakis.hunt.bad.size": "size must be small, medium, large or huge, not %s",
   "islandcraft_wormsofarrakis.hunt.bad.player": "no such player: %s",
   "islandcraft_wormsofarrakis.hunt.bad.range": "%s is outside %s; clamped to %s",
-  "islandcraft_wormsofarrakis.hunt.bad.width": "W must be 1 to 128"
+  "islandcraft_wormsofarrakis.hunt.bad.width": "W must be 1 to 128",
+  "islandcraft_wormsofarrakis.hunt.status.strike": "  strike: %s, direction %s (%s s left)",
+  "islandcraft_wormsofarrakis.hunt.status.strike_none": "  strike: not chosen yet",
+  "islandcraft_wormsofarrakis.hunt.strike.bad_type": "strike must be crest, crash, emerge or engulf, not %s",
+  "islandcraft_wormsofarrakis.hunt.strike.refused": "%s is not available at %s: %s (add force to run it anyway)",
+  "islandcraft_wormsofarrakis.hunt.strike.forced": "Strike %s will be used at the end of the freeze%s",
+  "islandcraft_wormsofarrakis.hunt.strike.forced_anyway": " (forced although it is not available here: %s)",
+  "islandcraft_wormsofarrakis.hunt.strike.needs_size": "strike needs a size (small, medium, large or huge) so the worm is known",
+  "death.attack.islandcraft_wormsofarrakis.swallowed": "%1$s was swallowed by a sandworm"
 }

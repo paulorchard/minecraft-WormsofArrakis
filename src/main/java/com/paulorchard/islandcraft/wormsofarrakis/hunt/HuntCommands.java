@@ -51,11 +51,15 @@ public final class HuntCommands {
                 .then(Commands.argument("player", EntityArgument.player()).executes(ctx -> aggro(ctx, EntityArgument.getPlayer(ctx, "player")))));
         h.then(Commands.literal("add").then(Commands.argument("player", EntityArgument.player())
                 .then(Commands.argument("amount", DoubleArgumentType.doubleArg(-100000, 100000)).executes(ctx -> add(ctx, EntityArgument.getPlayer(ctx, "player"), DoubleArgumentType.getDouble(ctx, "amount"))))));
-        h.then(Commands.literal("trigger").executes(ctx -> trigger(ctx, ctx.getSource().getPlayerOrException(), null))
-                .then(Commands.literal("self").executes(ctx -> trigger(ctx, ctx.getSource().getPlayerOrException(), null))
-                        .then(sizeArg(ctx -> trigger(ctx, ctx.getSource().getPlayerOrException(), StringArgumentType.getString(ctx, "size")))))
-                .then(Commands.argument("player", EntityArgument.player()).executes(ctx -> trigger(ctx, EntityArgument.getPlayer(ctx, "player"), null))
-                        .then(sizeArg(ctx -> trigger(ctx, EntityArgument.getPlayer(ctx, "player"), StringArgumentType.getString(ctx, "size"))))));
+        h.then(Commands.literal("trigger").executes(ctx -> trigger(ctx, ctx.getSource().getPlayerOrException(), null, null, false))
+                .then(Commands.literal("self").executes(ctx -> trigger(ctx, ctx.getSource().getPlayerOrException(), null, null, false))
+                        .then(sizeBranch(ctx -> ctx.getSource().getPlayerOrException())))
+                .then(Commands.argument("player", EntityArgument.player()).executes(ctx -> trigger(ctx, EntityArgument.getPlayer(ctx, "player"), null, null, false))
+                        .then(sizeBranch(ctx -> EntityArgument.getPlayer(ctx, "player")))));
+        h.then(Commands.literal("fake").then(Commands.literal("remove").executes(ctx -> { hunt().removeFakePlayers(); say(ctx, tr("stop.done", 0)); return 1; }))
+                .then(Commands.literal("trigger").then(sizeBranchFake()))
+                .then(Commands.argument("x", DoubleArgumentType.doubleArg(-30000000, 30000000)).then(Commands.argument("y", DoubleArgumentType.doubleArg(-64, 4000)).then(Commands.argument("z", DoubleArgumentType.doubleArg(-30000000, 30000000))
+                        .executes(ctx -> fake(ctx, DoubleArgumentType.getDouble(ctx, "x"), DoubleArgumentType.getDouble(ctx, "y"), DoubleArgumentType.getDouble(ctx, "z")))))));
         h.then(Commands.literal("stop").executes(ctx -> stop(ctx, null))
                 .then(Commands.argument("player", EntityArgument.player()).executes(ctx -> stop(ctx, EntityArgument.getPlayer(ctx, "player")))));
         h.then(Commands.literal("ignore").then(Commands.argument("player", EntityArgument.player()).executes(ctx -> ignore(ctx, EntityArgument.getPlayer(ctx, "player")))));
@@ -65,8 +69,32 @@ public final class HuntCommands {
         root.then(h);
     }
 
-    private static ArgumentBuilder<CommandSourceStack, ?> sizeArg(com.mojang.brigadier.Command<CommandSourceStack> run) {
-        return Commands.argument("size", StringArgumentType.word()).suggests((c, b) -> SharedSuggestionProvider.suggest(SIZES, b)).executes(run);
+    /** Test only: a fake player stands at x y z (the smoke start has no real player). */
+    private static int fake(CommandContext<CommandSourceStack> ctx, double x, double y, double z) {
+        ServerPlayer p = hunt().fakePlayer(ctx.getSource().getLevel(), x, y, z);
+        say(ctx, Component.literal("Fake player " + p.getGameProfile().name() + " stands at " + HuntAdapter.fmt(x) + " " + HuntAdapter.fmt(y) + " " + HuntAdapter.fmt(z) + " (test only; it takes part in the hunt like a player)"));
+        return 1;
+    }
+
+    private static ArgumentBuilder<CommandSourceStack, ?> sizeBranchFake() {
+        return sizeBranch(ctx -> {
+            ServerPlayer p = hunt().fakePlayerOrNull();
+            if (p == null) throw new com.mojang.brigadier.exceptions.SimpleCommandExceptionType(Component.literal("no fake player: hunt fake <x> <y> <z> first")).create();
+            return p;
+        });
+    }
+
+    private interface Who { ServerPlayer get(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException; }
+
+    private static final List<String> STRIKES = List.of("crest", "crash", "emerge", "engulf");
+
+    /** trigger <who> <size> [strike <crest|crash|emerge|engulf> [force]] */
+    private static ArgumentBuilder<CommandSourceStack, ?> sizeBranch(Who who) {
+        return Commands.argument("size", StringArgumentType.word()).suggests((c, b) -> SharedSuggestionProvider.suggest(SIZES, b))
+                .executes(ctx -> trigger(ctx, who.get(ctx), StringArgumentType.getString(ctx, "size"), null, false))
+                .then(Commands.literal("strike").then(Commands.argument("type", StringArgumentType.word()).suggests((c, b) -> SharedSuggestionProvider.suggest(STRIKES, b))
+                        .executes(ctx -> trigger(ctx, who.get(ctx), StringArgumentType.getString(ctx, "size"), StringArgumentType.getString(ctx, "type"), false))
+                        .then(Commands.literal("force").executes(ctx -> trigger(ctx, who.get(ctx), StringArgumentType.getString(ctx, "size"), StringArgumentType.getString(ctx, "type"), true)))));
     }
 
     // ---- the commands ----
@@ -112,7 +140,7 @@ public final class HuntCommands {
         return 1;
     }
 
-    private static int trigger(CommandContext<CommandSourceStack> ctx, ServerPlayer p, String sizeWord) {
+    private static int trigger(CommandContext<CommandSourceStack> ctx, ServerPlayer p, String sizeWord, String strikeWord, boolean force) {
         HuntAdapter a = hunt();
         SizeTable.Size size = null;
         if (sizeWord != null) {
@@ -121,10 +149,23 @@ public final class HuntCommands {
         }
         a.stateNow(p);
         String name = p.getGameProfile().name();
+        StrikeType forcedType = null;
+        String anyway = "";
+        if (strikeWord != null) {
+            forcedType = StrikeType.of(strikeWord.toLowerCase(Locale.ROOT));
+            if (forcedType == null) return fail(ctx, tr("strike.bad_type", strikeWord));
+            StrikeChoice.Availability av = a.strikes().availabilityNow(p, size);
+            if (!av.has(forcedType)) {
+                String why = av.why(forcedType);
+                if (!force) return fail(ctx, tr("strike.refused", forcedType.label, name, why));
+                anyway = tr("strike.forced_anyway", why).getString();
+            }
+        }
         HuntManager.TriggerResult r = a.manager().forceTrigger(p.getUUID(), size, a);
         switch (r) {
             case STARTED -> {
                 HuntEvent e = a.manager().eventOf(p.getUUID());
+                if (forcedType != null) { a.strikes().force(e.id, forcedType, force); say(ctx, tr("strike.forced", forcedType.label, anyway)); }
                 say(ctx, tr("trigger.started", name, e.size.label, HuntAdapter.trim(e.width), HuntAdapter.trim(e.stalkSeconds), e.members().size()));
                 return 1;
             }

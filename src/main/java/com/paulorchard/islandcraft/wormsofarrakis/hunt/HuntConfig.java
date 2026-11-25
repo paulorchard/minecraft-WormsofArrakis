@@ -43,6 +43,18 @@ public final class HuntConfig {
     /** The ripple lasts this many ticks (1 s). */
     public int tremorRippleTicks = 20;
 
+    // strike (prompt 14)
+    /** The odds of the four types, indexed by StrikeType (crest, crash, emerge, engulf); rescaled over the available ones. */
+    public double[] strikeWeights = {30, 25, 25, 20};
+    /** The crest corridor per size (small, medium, large, huge): blocks ahead (5.2 W), behind (2 W) and the height tolerance (0.25 W). */
+    public int[] crestAhead = {42, 83, 166, 250}, crestBehind = {16, 32, 64, 96}, crestTolerance = {2, 4, 8, 12};
+    /** cardinal (one of N E S W) or random (any yaw) for crash, emerge and engulf. */
+    public String strikeYawMode = "cardinal";
+    /** Seconds after the move starts at which the mouth encloses the victim: [type crest, crash, emerge, engulf][size small, medium, large, huge]. */
+    public double[][] devourSeconds = {{2.92, 4.58, 7.91, 11.26}, {4.14, 7.45, 14.08, 20.70}, {3.79, 5.84, 9.93, 14.02}, {3.17, 5.01, 8.94, 12.86}};
+    /** Columns the corridor scan reads per tick (it is spread over the last quarter of the freeze). */
+    public int scanColumnsPerTick = 60;
+
     /** Every key and its value, one line each, for the log. */
     public List<String> describe() {
         List<String> l = new ArrayList<>();
@@ -60,6 +72,10 @@ public final class HuntConfig {
         l.add("BuildUpFraction=" + buildUpFraction + " BuildUpMaxParticlesPerSecond=" + buildUpMaxParticlesPerSecond);
         l.add("TremorParticleBudgetPerTick=" + tremorParticleBudgetPerTick + " TremorBlockBudgetPerTick=" + tremorBlockBudgetPerTick);
         l.add("TremorRippleRadius=" + tremorRippleRadius + " TremorRippleLayers=" + tremorRippleLayers + " TremorParticles=" + tremorParticles + " TremorSoundVolume=" + tremorSoundVolume + " TremorRippleTicks=" + tremorRippleTicks);
+        l.add("StrikeWeights crest=" + strikeWeights[0] + " crash=" + strikeWeights[1] + " emerge=" + strikeWeights[2] + " engulf=" + strikeWeights[3] + " StrikeYawMode=" + strikeYawMode + " ScanColumnsPerTick=" + scanColumnsPerTick);
+        l.add("CrestAhead=" + java.util.Arrays.toString(crestAhead) + " CrestBehind=" + java.util.Arrays.toString(crestBehind) + " CrestTolerance=" + java.util.Arrays.toString(crestTolerance) + " (small, medium, large, huge)");
+        String[] mv = {"crest", "crash", "emerge", "engulf"}, sz = {"small", "medium", "large", "huge"};
+        for (int t = 0; t < 4; t++) for (int s = 0; s < 4; s++) l.add("DevourSeconds." + mv[t] + "." + sz[s] + "=" + devourSeconds[t][s]);
         return l;
     }
 }

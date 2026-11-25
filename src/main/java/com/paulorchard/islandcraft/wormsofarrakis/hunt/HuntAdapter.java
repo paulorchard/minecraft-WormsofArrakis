@@ -76,8 +76,24 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         mgr.aggro().setEffectProbe(this::hasEffect);
     }
 
+    private final StrikeRunner strikes = new StrikeRunner(this);
     private volatile FreezeHook freezeHook = FreezeHook.LOGGING;
     private final Map<UUID, FreezeRun> freezes = new HashMap<>();
+    private final List<ServerPlayer> extra = new ArrayList<>();
+
+    /** Test only (the smoke start): a fake player standing at a place; it is hunted like a real one. Revived if it was killed before. */
+    public ServerPlayer fakePlayer(ServerLevel level, double x, double y, double z) {
+        net.neoforged.neoforge.common.util.FakePlayer fp = net.neoforged.neoforge.common.util.FakePlayerFactory.get(level, new com.mojang.authlib.GameProfile(UUID.nameUUIDFromBytes("WormFake".getBytes()), "WormFake"));
+        if (!fp.isAlive()) fp.revive();
+        fp.setInvisible(false);
+        fp.setPos(x, y, z);
+        if (!extra.contains(fp)) extra.add(fp);
+        return fp;
+    }
+
+    public ServerPlayer fakePlayerOrNull() { return extra.isEmpty() ? null : extra.get(0); }
+
+    public void removeFakePlayers() { for (ServerPlayer p : extra) mgr.logoff(p.getUUID()); extra.clear(); }
 
     /** The camera prompt plugs in here. */
     public void setFreezeHook(FreezeHook h) { this.freezeHook = h == null ? FreezeHook.LOGGING : h; }
@@ -146,6 +162,10 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
             online.put(p.getUUID(), p);
             l.add(stateOf(p));
         }
+        for (ServerPlayer p : extra) {   // test-only fake players (hunt fake): the dedicated-server smoke start has no real player
+            online.put(p.getUUID(), p);
+            l.add(stateOf(p));
+        }
         return l;
     }
 
@@ -175,6 +195,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         server = e.getServer();
         refreshConfig();
         logConfig();
+        strikes.warmUp();
     }
 
     private boolean configLogged;
@@ -196,6 +217,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         lastBlocksSent = 0;
         mgr.tick(DT, this);
         tickFreezes();
+        strikes.tick();
         stepRipples();
         flushParticles();
     }
@@ -257,7 +279,11 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
     }
 
     @Override
+    public void onStrike(HuntEvent e) { strikes.onStrike(e); }
+
+    @Override
     public void onEnd(HuntEvent e, HuntEvent.EndReason reason) {
+        strikes.onEnd(e, reason);
         releaseFreeze(e);
         int restored = cancelRipples(e.id);
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: event {} ended {} (list scores set to 0; {} fake blocks restored)", e.id, reason, restored);
@@ -309,6 +335,14 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         freezeHook.onFreezeEnd(e.victim(), e);
     }
 
+    /** The freeze of the event's victim ends now (the devour: they are dead, nothing of it stays). */
+    void releaseFreezeOf(HuntEvent e) { releaseFreeze(e); }
+
+    boolean isSand(BlockState st) { return sandSet.contains(st.getBlock()); }
+    Integer surfaceOf(UUID id) { return surface.get(id); }
+    StrikeRunner strikes() { return strikes; }
+    MinecraftServer server() { return server; }
+
     public boolean frozen(UUID id) { FreezeRun r = freezes.get(id); return r != null && r.freeze.started() && !r.freeze.released(); }
 
     /** The attribute modifiers and the hold of one frozen victim. */
@@ -354,7 +388,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         @Override public void hold() {
             if (!anchored) { anchored = true; ax = player.getX(); az = player.getZ(); return; }
             double d = Math.hypot(player.getX() - ax, player.getZ() - az);
-            if (d > FREEZE_HOLD_TOLERANCE) {
+            if (d > FREEZE_HOLD_TOLERANCE && player.connection != null) {
                 player.connection.teleport(ax, player.getY(), az, player.getYRot(), player.getXRot());   // pushed or pearled away: put back on the spot (only past the tolerance)
                 WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: freeze {} was moved {} blocks from the spot, put back", player.getGameProfile().name(), trim(d));
             }
