@@ -85,6 +85,10 @@ public final class HuntEvent {
     public boolean devoured() { return devoured; }
     public String strikeType() { return strikeType; }
     public String strikeDir() { return strikeDir; }
+    private boolean noKill;
+    /** The strike runs without killing the victim (the test command's nokill): the first touch is logged and the camera starts, the freeze is released when the event ends. */
+    public boolean noKill() { return noKill; }
+    public void setNoKill(boolean b) { noKill = b; }
     private String killCause = "";
     /** How the victim died: "touch:head at 3.20 s (devour table 4.58 s)" or "backup ..." (empty while alive or when nobody died). */
     public String killCause() { return killCause; }

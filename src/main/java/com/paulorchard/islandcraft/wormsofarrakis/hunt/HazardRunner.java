@@ -158,7 +158,7 @@ public final class HazardRunner {
 
     private StrikeRunner.Run strikeRun(TestWormEntity w) { return w.isStrikeWorm() ? strikes.runOfWorm(w) : null; }
 
-    private static Predicate<Entity> cameraTest = e -> false;
+    private static Predicate<Entity> cameraTest = e -> e instanceof com.paulorchard.islandcraft.wormsofarrakis.camera.DeathCamEntity;
     /** The camera entity of part 3 is never a target. */
     public static void setCameraTest(Predicate<Entity> p) { cameraTest = p; }
 
@@ -202,6 +202,11 @@ public final class HazardRunner {
     /** The victim was killed by the strike (touch or backup): other features follow. */
     void victimKilled(ServerLevel level, LivingEntity v, TestWormEntity worm, double wormSeconds) {
         kills++;
+        for (KillListener l : listeners) l.onKill(level, v, true, worm, wormSeconds);
+    }
+
+    /** nokill: the worm touched the victim, who is not killed; the kill listeners (the camera) are told as for a death. */
+    void victimTouched(ServerLevel level, LivingEntity v, TestWormEntity worm, double wormSeconds) {
         for (KillListener l : listeners) l.onKill(level, v, true, worm, wormSeconds);
     }
 

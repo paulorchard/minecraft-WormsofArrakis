@@ -21,10 +21,16 @@ public final class TestSetup {
             "arrakis_worm_test", TestWormEntity::new, MobCategory.MISC,
             b -> b.sized(1.0F, 1.0F).clientTrackingRange(64).updateInterval(Integer.MAX_VALUE).noSave().noSummon().fireImmune());
 
+    /** Prompt 16 part 3: the invisible camera entity of the death screen (never saved, no summon, tracked up to 10 chunks, updated every tick). */
+    public static final DeferredHolder<EntityType<?>, EntityType<com.paulorchard.islandcraft.wormsofarrakis.camera.DeathCamEntity>> DEATH_CAMERA = ENTITIES.registerEntityType(
+            "arrakis_death_camera", com.paulorchard.islandcraft.wormsofarrakis.camera.DeathCamEntity::new, MobCategory.MISC,
+            b -> b.sized(0.0F, 0.0F).clientTrackingRange(10).updateInterval(1).noSave().noSummon().fireImmune());
+
     private TestSetup() {}
 
     public static void init(IEventBus modBus) {
         ENTITIES.register(modBus);
+        com.paulorchard.islandcraft.wormsofarrakis.camera.DeathCamManager.init();
         NeoForge.EVENT_BUS.addListener(TestCommand::onRegisterCommands);
         NeoForge.EVENT_BUS.addListener(PresetCommand::onRegisterCommands);
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] test content registered: entity arrakis_worm_test, commands /arrakis_worm_test and /arrakis-worm (the size presets)");

@@ -280,6 +280,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         strikes.onEnd(e, reason);
         releaseFreeze(e);
         int restored = stopRumbles(e.id);
+        com.paulorchard.islandcraft.wormsofarrakis.camera.DeathCamManager.instance().onEventEnd(e.id);
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: event {} ended {} (list scores set to 0; {} tremor rumble(s) stopped, their cells restored)", e.id, reason, restored);
     }
 
@@ -338,7 +339,15 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
     public boolean isSandBlock(BlockState st) { return sandSet.contains(st.getBlock()); }
     Integer surfaceOf(UUID id) { return surface.get(id); }
     StrikeRunner strikes() { return strikes; }
-    HazardRunner hazard() { return hazard; }
+    public HazardRunner hazard() { return hazard; }
+
+    /** What the camera needs to know about the strike of a worm entity (null when it is not a strike worm). */
+    public record StrikeInfo(long eventId, int sizeOrdinal, boolean noKill) {}
+
+    public StrikeInfo strikeInfo(com.paulorchard.islandcraft.wormsofarrakis.test.TestWormEntity w) {
+        StrikeRunner.Run r = strikes.runOfWorm(w);
+        return r == null ? null : new StrikeInfo(r.event.id, r.event.size.ordinal(), r.event.noKill());
+    }
     MinecraftServer server() { return server; }
 
     public boolean frozen(UUID id) { FreezeRun r = freezes.get(id); return r != null && r.freeze.started() && !r.freeze.released(); }

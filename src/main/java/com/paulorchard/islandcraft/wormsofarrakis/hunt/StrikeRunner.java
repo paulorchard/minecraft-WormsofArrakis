@@ -305,6 +305,15 @@ final class StrikeRunner {
         ServerLevel level = v.level();
         String who = v.getGameProfile().name();
         String cause = part == null ? "backup" : "touch:" + part;
+        if (r.event.noKill()) {
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} (nokill: {} is NOT killed; the strike runs on, the camera starts as for a death, the freeze (speed cut, jump block, hold) is released when the event ends, which gives the movement back)",
+                    part == null ? HazardRules.backupLine(who, wormSeconds, r.devourSeconds, r.backupSeconds) : HazardRules.killLine(who, part, wormSeconds, r.devourSeconds, "victim"), who);
+            r.event.setKillCause(cause + " (nokill, not killed)");
+            a.stopAttackRumble(r.event, "the worm touched the victim (nokill)");
+            HazardRunner hzn = HazardRunner.instance();
+            if (hzn != null) hzn.victimTouched(level, v, r.worm, wormSeconds);
+            return;
+        }
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {}", part == null ? HazardRules.backupLine(who, wormSeconds, r.devourSeconds, r.backupSeconds) : HazardRules.killLine(who, part, wormSeconds, r.devourSeconds, "victim"));
         r.event.setKillCause(cause + String.format(Locale.ROOT, " at %.2f s (devour table %.2f s)", wormSeconds, r.devourSeconds));
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: devour {} at {} s after the move started by {}: {} is swallowed (hidden, then killed by {}, which bypasses totems, absorption and armour)", r.type.label, HuntAdapter.fmt(wormSeconds), part == null ? "the backup (no touch before the devour time plus the backup)" : "contact with the " + part, who, SWALLOWED.identifier());

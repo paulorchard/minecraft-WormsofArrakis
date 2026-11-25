@@ -15,6 +15,7 @@ public final class TestClient {
     @SubscribeEvent
     public static void registerRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerEntityRenderer(TestSetup.WORM_TEST.get(), TestWormRenderer::new);
+        event.registerEntityRenderer(TestSetup.DEATH_CAMERA.get(), net.minecraft.client.renderer.entity.NoopRenderer::new);
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] client: test worm renderer registered (GeckoLib GeoEntityRenderer, texture minecraft:textures/block/dripstone_block.png by reference)");
     }
 }

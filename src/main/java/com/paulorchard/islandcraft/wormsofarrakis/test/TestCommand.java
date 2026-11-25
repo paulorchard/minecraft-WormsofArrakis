@@ -88,6 +88,7 @@ final class TestCommand {
         com.paulorchard.islandcraft.wormsofarrakis.hunt.HuntCommands.attach(root);
         com.paulorchard.islandcraft.wormsofarrakis.rumble.RumbleCommands.attach(root);
         com.paulorchard.islandcraft.wormsofarrakis.hunt.HazardCommands.attach(root);
+        com.paulorchard.islandcraft.wormsofarrakis.camera.CameraCommands.attach(root);
         root.then(Commands.literal("moves").executes(ctx -> {
             for (String line : MoveOptions.movesText()) notice(ctx, line);
             return MoveOptions.MOVES.size();

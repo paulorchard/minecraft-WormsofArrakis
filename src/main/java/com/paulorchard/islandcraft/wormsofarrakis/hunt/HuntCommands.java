@@ -101,6 +101,7 @@ public final class HuntCommands {
                 .executes(ctx -> trigger(ctx, who.get(ctx), StringArgumentType.getString(ctx, "size"), null, false))
                 .then(Commands.literal("strike").then(Commands.argument("type", StringArgumentType.word()).suggests((c, b) -> SharedSuggestionProvider.suggest(STRIKES, b))
                         .executes(ctx -> trigger(ctx, who.get(ctx), StringArgumentType.getString(ctx, "size"), StringArgumentType.getString(ctx, "type"), false))
+                        .then(Commands.literal("nokill").executes(ctx -> trigger(ctx, who.get(ctx), StringArgumentType.getString(ctx, "size"), StringArgumentType.getString(ctx, "type"), false, true)))
                         .then(Commands.literal("force").executes(ctx -> trigger(ctx, who.get(ctx), StringArgumentType.getString(ctx, "size"), StringArgumentType.getString(ctx, "type"), true)))));
     }
 
@@ -148,7 +149,9 @@ public final class HuntCommands {
         return 1;
     }
 
-    private static int trigger(CommandContext<CommandSourceStack> ctx, ServerPlayer p, String sizeWord, String strikeWord, boolean force) {
+    private static int trigger(CommandContext<CommandSourceStack> ctx, ServerPlayer p, String sizeWord, String strikeWord, boolean force) { return trigger(ctx, p, sizeWord, strikeWord, force, false); }
+
+    private static int trigger(CommandContext<CommandSourceStack> ctx, ServerPlayer p, String sizeWord, String strikeWord, boolean force, boolean nokill) {
         HuntAdapter a = hunt();
         SizeTable.Size size = null;
         if (sizeWord != null) {
