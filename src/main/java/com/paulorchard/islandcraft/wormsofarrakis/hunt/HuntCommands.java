@@ -1,6 +1,7 @@
 package com.paulorchard.islandcraft.wormsofarrakis.hunt;
 
 import com.mojang.brigadier.arguments.DoubleArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
@@ -69,6 +70,10 @@ public final class HuntCommands {
                 .then(Commands.argument("size", StringArgumentType.word()).suggests((c, b) -> SharedSuggestionProvider.suggest(List.of("small", "medium", "large", "huge", "8", "16", "32", "48"), b))
                         .executes(ctx -> previewAttack(ctx, StringArgumentType.getString(ctx, "size"), 8))
                         .then(Commands.argument("seconds", DoubleArgumentType.doubleArg(-1000, 100000)).executes(ctx -> previewAttack(ctx, StringArgumentType.getString(ctx, "size"), DoubleArgumentType.getDouble(ctx, "seconds"))))))
+                .then(Commands.literal("choice").executes(ctx -> previewChoice(ctx, "medium", 1000))
+                .then(Commands.argument("size", StringArgumentType.word()).suggests((c, b) -> SharedSuggestionProvider.suggest(SIZES, b))
+                        .executes(ctx -> previewChoice(ctx, StringArgumentType.getString(ctx, "size"), 1000))
+                        .then(Commands.argument("trials", IntegerArgumentType.integer(-1000000, 1000000)).executes(ctx -> previewChoice(ctx, StringArgumentType.getString(ctx, "size"), IntegerArgumentType.getInteger(ctx, "trials"))))))
                 .then(Commands.literal("area").executes(ctx -> previewArea(ctx, "medium", null))
                 .then(Commands.argument("size", StringArgumentType.word()).suggests((c, b) -> SharedSuggestionProvider.suggest(SIZES, b))
                         .executes(ctx -> previewArea(ctx, StringArgumentType.getString(ctx, "size"), null))
@@ -127,6 +132,7 @@ public final class HuntCommands {
         if (events.isEmpty()) say(ctx, tr("status.none"));
         for (HuntEvent e : events) {
             say(ctx, tr("status.event", e.id, e.size.label, HuntAdapter.trim(e.width), e.phase().name(), HuntAdapter.fmt(e.secondsLeft()), e.members().size()));
+            if (!e.strikeType().isEmpty()) say(ctx, Component.literal("  size=" + e.size.label + " strike=" + (e.strikeSize() != e.size ? e.strikeSize().label + " " : "") + e.strikeType() + (e.strikeFallback() ? " (fallback)" : "")));
             for (UUID u : e.members()) {
                 PlayerState s = a.manager().lastState(u);
                 String name = s == null ? u.toString() : s.name();
@@ -261,6 +267,17 @@ public final class HuntCommands {
         AttackRumble.Plan plan = a.previewAttackRumble(p, size, sec);
         say(ctx, Component.literal(String.format(Locale.ROOT, "hunt preview attackrumble: %s W%s: radius %.1f blocks, columns move up to %d/16, strength %.2f rising to 1.00 over %.1f s then 1.00, for %.1f s in all, then it stops (the tremor sound and sand particles repeat while it runs)",
                 size.label, HuntAdapter.trim(size.width), plan.radius(), plan.maxSixteenths(), plan.start(), plan.freezeSeconds(), sec)));
+        return 1;
+    }
+
+    /** hunt preview choice [size] [trials]: the availability check at the caller's place and the seeded choice many times, nothing is spawned (prompt 19). */
+    private static int previewChoice(CommandContext<CommandSourceStack> ctx, String sizeWord, int trials) throws CommandSyntaxException {
+        ServerPlayer p = ctx.getSource().getPlayerOrException();
+        SizeTable.Size size = SizeTable.Size.of(sizeWord.toLowerCase(Locale.ROOT));
+        if (size == null) return fail(ctx, Component.literal("hunt preview choice: '" + sizeWord + "' is not small, medium, large or huge"));
+        int n = Math.max(1, Math.min(100000, trials));
+        if (n != trials) say(ctx, Component.literal("hunt preview choice: " + trials + " trials is outside 1 to 100000: " + n + " used"));
+        for (String l : hunt().previewChoice(p, size, n)) say(ctx, Component.literal("hunt preview choice: " + l));
         return 1;
     }
 

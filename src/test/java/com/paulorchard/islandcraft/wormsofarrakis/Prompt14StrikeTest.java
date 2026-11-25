@@ -41,6 +41,8 @@ class Prompt14StrikeTest {
     private static final double VX = 100.5, VZ = 100.5;
     private static final int GROUND = 64;
     private static final HuntConfig CFG = new HuntConfig();
+    /** The single weight set of prompts 14 to 18, kept here to test the rescaling maths (prompt 19 made the weights per size). */
+    private static final double[] LEGACY = {30, 25, 25, 20};
 
     private static SizeTable.Size[] sizes() { return SizeTable.Size.values(); }
 
@@ -305,7 +307,7 @@ class Prompt14StrikeTest {
     private static Map<StrikeType, Double> share(List<StrikeType> avail, int n, long seed) {
         Random rng = new Random(seed);
         Map<StrikeType, Integer> c = new EnumMap<>(StrikeType.class);
-        for (int i = 0; i < n; i++) c.merge(StrikeChoice.pick(avail, CFG, rng), 1, Integer::sum);
+        for (int i = 0; i < n; i++) c.merge(StrikeChoice.pick(avail, LEGACY, rng), 1, Integer::sum);
         Map<StrikeType, Double> m = new EnumMap<>(StrikeType.class);
         for (StrikeType t : avail) m.put(t, 100.0 * c.getOrDefault(t, 0) / n);
         return m;
@@ -314,19 +316,19 @@ class Prompt14StrikeTest {
     @Test
     void theOddsAreTheWeightsRescaledOverWhatIsAvailable() {
         List<StrikeType> all = List.of(StrikeType.CREST, StrikeType.CRASH, StrikeType.EMERGE, StrikeType.ENGULF);
-        Map<StrikeType, Double> o = StrikeChoice.odds(all, CFG);
+        Map<StrikeType, Double> o = StrikeChoice.odds(all, LEGACY);
         assertEquals(30.0, o.get(StrikeType.CREST), 1e-9);
         assertEquals(25.0, o.get(StrikeType.CRASH), 1e-9);
         assertEquals(25.0, o.get(StrikeType.EMERGE), 1e-9);
         assertEquals(20.0, o.get(StrikeType.ENGULF), 1e-9);
-        Map<StrikeType, Double> noCrest = StrikeChoice.odds(List.of(StrikeType.CRASH, StrikeType.EMERGE, StrikeType.ENGULF), CFG);
+        Map<StrikeType, Double> noCrest = StrikeChoice.odds(List.of(StrikeType.CRASH, StrikeType.EMERGE, StrikeType.ENGULF), LEGACY);
         assertEquals(25 / 70.0 * 100, noCrest.get(StrikeType.CRASH), 1e-9);
         assertEquals(25 / 70.0 * 100, noCrest.get(StrikeType.EMERGE), 1e-9);
         assertEquals(20 / 70.0 * 100, noCrest.get(StrikeType.ENGULF), 1e-9);
-        Map<StrikeType, Double> noEngulf = StrikeChoice.odds(List.of(StrikeType.CREST, StrikeType.CRASH, StrikeType.EMERGE), CFG);
+        Map<StrikeType, Double> noEngulf = StrikeChoice.odds(List.of(StrikeType.CREST, StrikeType.CRASH, StrikeType.EMERGE), LEGACY);
         assertEquals(37.5, noEngulf.get(StrikeType.CREST), 1e-9);
         assertEquals(31.25, noEngulf.get(StrikeType.CRASH), 1e-9);
-        Map<StrikeType, Double> two = StrikeChoice.odds(List.of(StrikeType.CRASH, StrikeType.EMERGE), CFG);
+        Map<StrikeType, Double> two = StrikeChoice.odds(List.of(StrikeType.CRASH, StrikeType.EMERGE), LEGACY);
         assertEquals(50.0, two.get(StrikeType.CRASH), 1e-9);
         assertEquals(50.0, two.get(StrikeType.EMERGE), 1e-9);
     }
@@ -352,7 +354,7 @@ class Prompt14StrikeTest {
         a.available.add(StrikeType.CRASH);
         a.available.add(StrikeType.EMERGE);
         StrikeChoice.Choice c = new StrikeChoice.Choice(StrikeType.CRASH, null, 12);
-        assertEquals("strike: size=small W8 available=[crash,emerge] weights=[crash=25,emerge=25] chosen=crash dir=-", StrikeChoice.line(SizeTable.Size.SMALL, a, CFG, c));
+        assertEquals("strike: size=small W8 available=[crash,emerge] weights=[crash=70,emerge=10] chosen=crash dir=-", StrikeChoice.line(SizeTable.Size.SMALL, a, CFG, c));
         a.available.add(0, StrikeType.CREST);
         assertTrue(StrikeChoice.line(SizeTable.Size.HUGE, a, CFG, new StrikeChoice.Choice(StrikeType.CREST, Dir.E, 270)).endsWith("chosen=crest dir=E"));
         Random rng = new Random(5);

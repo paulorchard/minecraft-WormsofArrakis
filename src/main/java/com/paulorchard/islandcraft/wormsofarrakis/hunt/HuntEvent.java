@@ -58,6 +58,8 @@ public final class HuntEvent {
     private boolean strikeDone, devoured;
     private double strikeLimit = Double.MAX_VALUE;
     private String strikeType = "", strikeDir = "";
+    private SizeTable.Size strikeSize;   // the size of the worm that strikes (prompt 19): the event's size, or the fallback size
+    private boolean strikeFallback;
 
     public HuntEvent(long id, UUID trigger, String dim, SizeTable.Size size, List<UUID> roster, HuntConfig cfg, Hooks hooks, StrikeHook strike) {
         this.id = id;
@@ -100,6 +102,10 @@ public final class HuntEvent {
     /** The longest the event waits for the strike, in seconds from the start of STRIKE (a safety net; the move's own end normally comes first). */
     public void setStrikeLimit(double seconds) { strikeLimit = seconds; }
     public void setStrikeInfo(String type, String dir) { strikeType = type; strikeDir = dir; }
+    public void setStrikeSize(SizeTable.Size size, boolean fallback) { strikeSize = size; strikeFallback = fallback; }
+    /** The size of the strike (after the choice); the event's own size before it. */
+    public SizeTable.Size strikeSize() { return strikeSize == null ? size : strikeSize; }
+    public boolean strikeFallback() { return strikeFallback; }
     public List<UUID> members() { return new ArrayList<>(members); }
     public boolean has(UUID id) { return members.contains(id); }
     public Tremor.Clock clockOf(UUID id) { return clocks.get(id); }

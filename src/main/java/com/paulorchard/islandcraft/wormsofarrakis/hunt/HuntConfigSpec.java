@@ -75,6 +75,9 @@ public final class HuntConfigSpec {
     }
 
     static final ModConfigSpec.DoubleValue[] WEIGHT = new ModConfigSpec.DoubleValue[4];
+    static final ModConfigSpec.DoubleValue[][] WEIGHT2 = new ModConfigSpec.DoubleValue[4][4];
+    @SuppressWarnings("unchecked")
+    static final ModConfigSpec.ConfigValue<String>[] FB_SIZE = new ModConfigSpec.ConfigValue[4], FB_TYPE = new ModConfigSpec.ConfigValue[4];
     static final ModConfigSpec.IntValue[] AHEAD = new ModConfigSpec.IntValue[4], BEHIND = new ModConfigSpec.IntValue[4], TOL = new ModConfigSpec.IntValue[4];
     static final ModConfigSpec.DoubleValue[][] DEVOUR = new ModConfigSpec.DoubleValue[4][4];
     static final ModConfigSpec.ConfigValue<String> YAW_MODE;
@@ -83,8 +86,19 @@ public final class HuntConfigSpec {
         HuntConfig def = new HuntConfig();
         String[] mv = {"crest", "crash", "emerge", "engulf"}, sz = {"small", "medium", "large", "huge"};
         B.push("strike");
-        B.comment("The odds of the four strike types; rescaled over the types available at the victim's place (crash and emerge always are).").push("StrikeWeights");
-        for (int t = 0; t < 4; t++) WEIGHT[t] = d(mv[t], def.strikeWeights[t], 0, 100000, "Weight of the " + mv[t] + ".");
+        B.comment("The odds of the four strike types PER SIZE (the tables small, medium, large, huge); rescaled over the types available at the victim's place and with a weight above 0. 0 = never chosen for that size (and its availability is not even checked). A negative number or a table that sums to 0 is refused and the default table is used. The four keys directly under StrikeWeights are the RETIRED single set of prompts 14 to 18 and are ignored.").push("StrikeWeights");
+        for (int t = 0; t < 4; t++) WEIGHT[t] = d(mv[t], def.strikeWeights[t], -100000, 100000, "RETIRED (prompt 19): replaced by the per-size tables below; ignored.");
+        for (int s = 0; s < 4; s++) {
+            B.push(sz[s]);
+            for (int t = 0; t < 4; t++) WEIGHT2[s][t] = d(mv[t], HuntConfig.DEFAULT_WEIGHTS[s][t], -100000, 100000, "Weight of the " + mv[t] + " for the " + sz[s] + " worm.");
+            B.pop();
+        }
+        B.pop();
+        B.comment("When no type with a weight above 0 is available for the event's size, the strike is a worm of this size (huge: a medium).").push("FallbackSize");
+        for (int s = 0; s < 4; s++) FB_SIZE[s] = B.comment("Fallback strike size for the " + sz[s] + " event (small, medium, large or huge).").define(sz[s], def.fallbackSize[s], o -> o instanceof String);
+        B.pop();
+        B.comment("The strike type of the fallback (only crash or emerge: the always available ones).").push("FallbackType");
+        for (int s = 0; s < 4; s++) FB_TYPE[s] = B.comment("Fallback strike type for the " + sz[s] + " event (crash or emerge).").define(sz[s], def.fallbackType[s], o -> o instanceof String);
         B.pop();
         B.comment("Crest corridor: sand needed ahead of the victim (blocks), per size (5.2 W).").push("CrestAhead");
         for (int s = 0; s < 4; s++) AHEAD[s] = i(sz[s], def.crestAhead[s], 1, 10000, "Blocks ahead, " + sz[s] + ".");
@@ -237,6 +251,11 @@ public final class HuntConfigSpec {
             c.roarFarPitch = ROAR_PITCH.get();
             for (int s = 0; s < 4; s++) c.roarDistance[s] = ROAR_DIST[s].get();
             for (int t = 0; t < 4; t++) c.strikeWeights[t] = WEIGHT[t].get();
+            for (int s = 0; s < 4; s++) {
+                for (int t = 0; t < 4; t++) c.strikeWeightsBySize[s][t] = WEIGHT2[s][t].get();
+                c.fallbackSize[s] = FB_SIZE[s].get();
+                c.fallbackType[s] = FB_TYPE[s].get();
+            }
             for (int s = 0; s < 4; s++) { c.crestAhead[s] = AHEAD[s].get(); c.crestBehind[s] = BEHIND[s].get(); c.crestTolerance[s] = TOL[s].get(); }
             for (int t = 0; t < 4; t++) for (int s = 0; s < 4; s++) c.devourSeconds[t][s] = DEVOUR[t][s].get();
             c.strikeYawMode = YAW_MODE.get();

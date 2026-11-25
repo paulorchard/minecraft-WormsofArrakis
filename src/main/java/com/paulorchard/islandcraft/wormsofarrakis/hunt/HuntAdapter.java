@@ -88,6 +88,8 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         return camPeaks.computeIfAbsent(t.label + "/" + s.label, k -> new com.paulorchard.islandcraft.wormsofarrakis.hazard.WormHazard(Alignment.once(t, s), 0, 0, 0, 0, com.paulorchard.islandcraft.wormsofarrakis.hazard.WormHazard.Settings.DEFAULTS).peak(0.1));
     }
 
+    public List<String> previewChoice(ServerPlayer p, SizeTable.Size size, int trials) { return strikes.previewChoice(p, size, trials); }
+
     public List<String> previewCameraMove(ServerPlayer p, SizeTable.Size size, StrikeType type) { return cameraMovePreview.start(p, size, type); }
 
     /** A later feature subscribes to the disc crossings here. */
@@ -96,6 +98,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
     /** Start-up (prompt 18): the disc numbers, the expected disc times for a player at the entry crossing, the camera distances and the retired keys. */
     private void logDiscsAndCamera() {
         long t0 = System.nanoTime();
+        for (String k : cfg.weightProblems()) WormsOfArrakis.LOGGER.warn("[WormsOfArrakis] config: {}", k);
         for (String k : cfg.retiredKeysInUse()) WormsOfArrakis.LOGGER.warn("[WormsOfArrakis] config: the key {} no longer does anything (prompt 18)", k);
         StringBuilder g = new StringBuilder();
         for (SizeTable.Size s : SizeTable.Size.values()) {
@@ -470,7 +473,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
 
     public StrikeInfo strikeInfo(com.paulorchard.islandcraft.wormsofarrakis.test.TestWormEntity w) {
         StrikeRunner.Run r = strikes.runOfWorm(w);
-        return r == null ? null : new StrikeInfo(r.event.id, r.event.size.ordinal(), r.event.noKill());
+        return r == null ? null : new StrikeInfo(r.event.id, (r.strikeSize == null ? r.event.size : r.strikeSize).ordinal(), r.event.noKill());
     }
     MinecraftServer server() { return server; }
 
@@ -698,9 +701,9 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         final UUID victim;       // the player the rumble is round (a member of the group)
         final ServerLevel level;
         com.paulorchard.islandcraft.wormsofarrakis.rumble.Rumble.Handle handle;
-        final AttackRumble.Plan plan;
+        AttackRumble.Plan plan;   // replaced at the choice when the strike is smaller than the event (prompt 19)
         final AttackRumble.FxClock fx;
-        final Tremor.Plan fxPlan;
+        Tremor.Plan fxPlan;
         final RumbleFollow follow;   // null for a preview
         final List<Retired> retired = new ArrayList<>();
         double t, viewerT;
@@ -834,6 +837,26 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         r.retired.add(new Retired(old, r.t + FOLLOW_OVERLAP));
         attackRecentred++;
         if (pinned) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: attack rumble of {} is pinned on the block they are held on ({}, {}) after {} s", p.getGameProfile().name(), fmt(x), fmt(z), fmt(r.t));
+    }
+
+    /**
+     * The strike is of another size than the event (the huge fallback, prompt 19): from the choice on the rumble of every member of the event has the radius, height and effects of the STRIKE size. A
+     * new rumble is started at the held block with the new numbers and the old one stops after the overlap (the claim rule restores a column only when nobody claims it: no fake block is left).
+     */
+    void resizeAttackRumbles(HuntEvent e, SizeTable.Size strikeSize) {
+        double factor = SizeFactor.of(strikeSize.width);
+        for (AttackRun r : new ArrayList<>(attackRuns.values())) {
+            if (r.event != e) continue;
+            ServerPlayer p = online.get(r.victim);
+            if (p == null) continue;
+            AttackRumble.Plan np = AttackRumble.plan(factor, cfg, 0);
+            AttackRumble.Plan old = r.plan;
+            r.plan = new AttackRumble.Plan(np.radius(), np.maxSixteenths(), np.start(), np.freezeSeconds(), old.seconds(), factor);
+            r.fxPlan = Tremor.plan(1.0, factor, cfg);
+            double x = r.follow != null ? r.follow.x() : p.getX(), z = r.follow != null ? r.follow.z() : p.getZ();
+            recentre(r, p, x, z, true);
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: attack rumble of {} resized at the choice: radius {} to {} blocks, max {}/16 to {}/16 (the strike is a {} worm, the event a {} one)", p.getGameProfile().name(), fmt(old.radius()), fmt(r.plan.radius()), old.maxSixteenths(), r.plan.maxSixteenths(), strikeSize.label, e.size.label);
+        }
     }
 
     private void stopAttackRun(AttackRun r, String why) {

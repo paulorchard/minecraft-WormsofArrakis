@@ -54,6 +54,7 @@ final class GroupRunner {
         int strikeTicks;
         TestWormEntity worm;
         String type = "-";
+        SizeTable.Size strikeSize;   // the size of the strike (prompt 19)
 
         Group(HuntEvent e, UUID victim) {
             this.event = e;
@@ -131,7 +132,7 @@ final class GroupRunner {
     // ---- the choice at the end of the freeze ----
 
     /** The strike is chosen and placed: members outside the circle of the move are released, everyone still held gets the strike camera. */
-    void onChoice(HuntEvent e, StrikeType type, double entryX, double entryZ, double yawDeg, double playSeconds, TestWormEntity worm) {
+    void onChoice(HuntEvent e, StrikeType type, SizeTable.Size strikeSize, double entryX, double entryZ, double yawDeg, double playSeconds, TestWormEntity worm) {
         Group g = groups.get(e.id);
         if (g == null) return;
         g.chosen = true;
@@ -140,7 +141,8 @@ final class GroupRunner {
         g.cx = entryX;
         g.cz = entryZ;
         g.playSeconds = playSeconds;
-        g.circleRadius = a.strikeAreaRadius(type, e.size);
+        g.strikeSize = strikeSize;
+        g.circleRadius = a.strikeAreaRadius(type, strikeSize);
         g.safetySeconds = SwallowRules.safetySeconds(playSeconds, a.config().swallowMaxSeconds);
         Map<UUID, double[]> spots = new LinkedHashMap<>();
         for (Member m : g.members.values()) {
@@ -248,7 +250,7 @@ final class GroupRunner {
         long seed = e.id * 0x9E3779B97F4A7C15L ^ m.id.getLeastSignificantBits();
         double remaining = Math.max(1.0, g.playSeconds - g.strikeTicks / 20.0);
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] camera: {} starts at t={} after the move started because {}", m.name, HuntAdapter.fmt(wormSeconds), why);
-        var s = DeathCamManager.instance().startStrikeCamera(p, g.worm.getYRot(), hz.R, hz.headLength(), a.camPeak(t, e.size), seed, remaining, new WormSurface(g.worm, hz), e.id);
+        var s = DeathCamManager.instance().startStrikeCamera(p, g.worm.getYRot(), hz.R, hz.headLength(), a.camPeak(t, g.strikeSize == null ? e.size : g.strikeSize), seed, remaining, new WormSurface(g.worm, hz), e.id);
         m.camera = s != null;
     }
 
@@ -257,7 +259,7 @@ final class GroupRunner {
         if (m.discLogged) return;
         m.discLogged = true;
         String body = m.rec.describe();
-        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] discs: {} {} ({} W{})", m.name, body, g.type, HuntAdapter.trim(g.event.width));
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] discs: {} {} ({} W{})", m.name, body, g.type, HuntAdapter.trim(g.strikeSize == null ? g.event.width : g.strikeSize.width));
     }
 
     // ---- every tick ----

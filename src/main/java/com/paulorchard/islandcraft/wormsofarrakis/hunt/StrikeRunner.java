@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -73,6 +74,8 @@ final class StrikeRunner {
         int ticks;
         ServerLevel level;
         boolean stallLogged;
+        SizeTable.Size strikeSize;   // the size of the worm that strikes (the event's size unless the fallback applies)
+        boolean fallback;
         double playSeconds;
 
         Run(HuntEvent event, UUID victim, StrikeType type, double devourSeconds, double backupSeconds) {
@@ -154,13 +157,52 @@ final class StrikeRunner {
     }
 
     private StrikeChoice.Availability evaluate(Corridor.Terrain t, ServerPlayer p, double x, double z, int groundY, SizeTable.Size size) {
-        return StrikeChoice.evaluate(t, x, z, groundY, size, a.config(), (int) Math.round(plan(StrikeType.CREST, size).r0()), plan(StrikeType.ENGULF, size).r0());
+        return evaluate(t, p, x, z, groundY, size, Set.of());
+    }
+
+    /** {@code skip}: the types whose availability is not read at all (weight 0 for the size, prompt 19). */
+    private StrikeChoice.Availability evaluate(Corridor.Terrain t, ServerPlayer p, double x, double z, int groundY, SizeTable.Size size, Set<StrikeType> skip) {
+        return StrikeChoice.evaluate(t, x, z, groundY, size, a.config(), (int) Math.round(plan(StrikeType.CREST, size).r0()), plan(StrikeType.ENGULF, size).r0(), skip);
     }
 
     /** The availability at the player's place right now, read at once (the command that forces a type checks it). */
     StrikeChoice.Availability availabilityNow(ServerPlayer p, SizeTable.Size size) {
         a.stateNow(p);
         return evaluate(terrainOf(p.level()), p, p.getX(), p.getZ(), groundY(p), size);
+    }
+
+    /** The types that need no availability check for this event: weight 0 for its size, unless forced (prompt 19). */
+    private Set<StrikeType> skipFor(HuntEvent e) {
+        Forced f = forced.get(e.id);
+        return StrikeChoice.skipSet(a.config(), e.size, f == null ? null : f.type());
+    }
+
+    /** hunt preview choice: the availability here and the seeded choice {@code trials} times; nothing is spawned. */
+    java.util.List<String> previewChoice(ServerPlayer p, SizeTable.Size size, int trials) {
+        a.stateNow(p);
+        java.util.List<String> out = new java.util.ArrayList<>();
+        Set<StrikeType> skip = StrikeChoice.skipSet(a.config(), size, null);
+        StrikeChoice.Availability av = evaluate(terrainOf(p.level()), p, p.getX(), p.getZ(), groundY(p), size, skip);
+        StrikeChoice.Availability full = evaluate(terrainOf(p.level()), p, p.getX(), p.getZ(), groundY(p), size, Set.of());
+        double[] w = a.config().weightsFor(size);
+        StringBuilder b = new StringBuilder("available for " + size.label + " (W" + HuntAdapter.trim(size.width) + "): ");
+        for (StrikeType t : StrikeType.values()) b.append(t.label).append(av.has(t) ? " yes" : " no").append(" (weight ").append(HuntAdapter.trim(w[t.ordinal()])).append(");  ");
+        out.add(b.toString());
+        for (StrikeType t : StrikeType.values()) if (!av.has(t)) out.add(t.label + " not available: " + (av.skipped.contains(t) ? "not checked: weight 0 for this size" + (full.has(t) ? " (it would be available here)" : " (it would not be available here: " + full.why(t) + ")") : av.why(t)));
+        out.add("columns read: " + av.reads + (skip.isEmpty() ? "" : " (instead of " + full.reads + " if every type were checked)"));
+        java.util.Random r = new java.util.Random(20260101L);
+        java.util.Map<String, Integer> count = new java.util.LinkedHashMap<>();
+        for (StrikeType t : StrikeType.values()) count.put(t.label, 0);
+        for (int i = 0; i < trials; i++) {
+            StrikeChoice.Decision d = StrikeChoice.decide(av, a.config(), size, r, null);
+            String k = d.fallback() ? "fallback " + d.strikeSize().label + " " + d.choice().type().label : d.choice().type().label;
+            count.merge(k, 1, Integer::sum);
+        }
+        StringBuilder s = new StringBuilder(trials + " seeded trials: ");
+        for (var en : count.entrySet()) if (en.getValue() > 0 || !en.getKey().startsWith("fallback")) s.append(en.getKey()).append(' ').append(String.format(Locale.ROOT, "%.1f", 100.0 * en.getValue() / trials)).append("%;  ");
+        out.add(s.toString());
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: preview choice for {} on {}: {} | {}", size.label, p.getGameProfile().name(), b, s);
+        return out;
     }
 
     void force(long eventId, StrikeType t, boolean force) { forced.put(eventId, new Forced(t, force)); }
@@ -183,7 +225,7 @@ final class StrikeRunner {
                 s.ticks++;
                 s.terrain.newTick(a.config().scanColumnsPerTick);
                 final Scan sc = s;
-                s.result = s.terrain.step(() -> evaluate(sc.terrain, p, sc.x, sc.z, sc.groundY, e.size));
+                s.result = s.terrain.step(() -> evaluate(sc.terrain, p, sc.x, sc.z, sc.groundY, e.size, skipFor(e)));
                 if (s.result != null) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: scan finished in {} tick(s), {} columns read, available={}", s.ticks, s.terrain.columns(), s.result.available.stream().map(t -> t.label).toList());
             }
         }
@@ -241,16 +283,19 @@ final class StrikeRunner {
             WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: using the scan made during the freeze ({} columns)", sc.terrain.columns());
         } else {
             long t0 = System.nanoTime();
-            av = evaluate(terrainOf(level), p, x, z, gy, e.size);
+            av = evaluate(terrainOf(level), p, x, z, gy, e.size, skipFor(e));
             WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: {} so the columns are read now: {} columns in {} us", sc == null ? "no scan was finished" : "the victim moved from the scan", av.reads, (System.nanoTime() - t0) / 1000);
         }
         if (av.unloaded) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: some columns were in unloaded chunks; they count as failures (no chunk is loaded for the check)");
         for (StrikeType t : new StrikeType[]{StrikeType.CREST, StrikeType.ENGULF}) if (!av.has(t)) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: {} not available: {}", t.label, av.why(t));
         Forced f = forced.remove(e.id);
         if (f != null && !av.has(f.type())) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: forced {} is not available here now ({}); it runs because it was ordered{}", f.type().label, av.why(f.type()), f.force() ? " with force" : " when it was available");
-        StrikeChoice.Choice c = StrikeChoice.choose(av, a.config(), rng, f == null ? null : f.type());
+        StrikeChoice.Decision dec = StrikeChoice.decide(av, a.config(), e.size, rng, f == null ? null : f.type());
+        StrikeChoice.Choice c = dec.choice();
+        SizeTable.Size ss = dec.strikeSize();   // the size of the strike: from here on everything that depends on the strike reads THIS, not the event's size
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {}", StrikeChoice.line(e.size, av, a.config(), c));
-        Plan plan = plan(c.type(), e.size);
+        if (dec.fallback()) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: no weighted type available for {} ({}); fallback {} {}", e.size.label, dec.why().isEmpty() ? "none has a weight above 0" : dec.why(), ss.label, c.type().label);
+        Plan plan = plan(c.type(), ss);
         double[] o = Alignment.origin(x, z, plan.entryZ(), c.yawDeg());
         double baseY = gy + 1.0;   // the top face of the sand block under the victim is the move's sand level
         TestWormEntity worm = WormSpawner.spawn(level, plan.spec(), o[0], baseY, o[1], (float) c.yawDeg());
@@ -259,21 +304,25 @@ final class StrikeRunner {
             e.end(HuntEvent.EndReason.FIZZLED);
             return;
         }
-        double devour = a.config().devourSeconds[c.type().ordinal()][e.size.ordinal()];
+        double devour = a.config().devourSeconds[c.type().ordinal()][ss.ordinal()];
         Run r = new Run(e, e.victim(), c.type(), devour, a.config().throatBackupSeconds);
         r.worm = worm;
         r.level = level;
         r.playSeconds = plan.playTime();
+        r.strikeSize = ss;
+        r.fallback = dec.fallback();
+        e.setStrikeSize(ss, dec.fallback());
         worm.markStrikeWorm();
         runs.put(e.id, r);
         e.setStrikeInfo(c.type().label, c.dir() == null ? "-" : c.dir().name());
         e.setStrikeLimit(plan.playTime() + MoveFactory.REMOVE_MARGIN + END_MARGIN);
         double[] at = Alignment.worldOf(o, plan.entryZ(), c.yawDeg());
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: start {} W{} on {} at ({}, {}, {}) yaw {}: origin ({}, {}), entry crossing z={} at ({}, {}) = the victim's feet; devour at {} s; run {} s; the event waits for the worm to remove itself (limit {} s)",
-                c.type().label, HuntAdapter.trim(e.width), e.victimName(), HuntAdapter.fmt(x), HuntAdapter.fmt(baseY), HuntAdapter.fmt(z), HuntAdapter.fmt(c.yawDeg()), HuntAdapter.fmt(o[0]), HuntAdapter.fmt(o[1]), HuntAdapter.fmt(plan.entryZ()),
+                c.type().label, HuntAdapter.trim(ss.width), e.victimName(), HuntAdapter.fmt(x), HuntAdapter.fmt(baseY), HuntAdapter.fmt(z), HuntAdapter.fmt(c.yawDeg()), HuntAdapter.fmt(o[0]), HuntAdapter.fmt(o[1]), HuntAdapter.fmt(plan.entryZ()),
                 HuntAdapter.fmt(at[0]), HuntAdapter.fmt(at[1]), HuntAdapter.fmt(devour), HuntAdapter.fmt(plan.playTime()), HuntAdapter.fmt(plan.playTime() + MoveFactory.REMOVE_MARGIN + END_MARGIN));
-        a.groups().onChoice(e, c.type(), at[0], at[1], c.yawDeg(), plan.playTime(), worm);   // members outside the circle are released, the others get the strike camera
-        tickets.acquire(level, e.id, at[0], at[1], a.strikeAreaRadius(c.type(), e.size) + e.width, a.config().strikeChunkTicketMax);
+        a.groups().onChoice(e, c.type(), ss, at[0], at[1], c.yawDeg(), plan.playTime(), worm);
+        if (dec.fallback()) a.resizeAttackRumbles(e, ss);   // the rumble of the huge freeze becomes the rumble of the medium strike   // members outside the circle are released, the others get the strike camera
+        tickets.acquire(level, e.id, at[0], at[1], a.strikeAreaRadius(c.type(), ss) + ss.width, a.config().strikeChunkTicketMax);
     }
 
     // ---- the devour ----

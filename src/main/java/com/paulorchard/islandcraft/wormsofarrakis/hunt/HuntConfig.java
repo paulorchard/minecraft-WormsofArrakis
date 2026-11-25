@@ -73,6 +73,7 @@ public final class HuntConfig {
     /** The retired and superseded keys whose value differs from the default: they no longer do anything (prompt 18); one warning line each, logged once at start-up. */
     public java.util.List<String> retiredKeysInUse() {
         java.util.List<String> l = new java.util.ArrayList<>();
+        if (!java.util.Arrays.equals(strikeWeights, new double[]{30, 25, 25, 20})) l.add("StrikeWeights.crest/crash/emerge/engulf (retired single set: the per-size tables StrikeWeights.<size> replace it; the old numbers are ignored)");
         if (!"body,head,throat".equals(hazardParts)) l.add("HazardParts (retired: the body, head and mandibles are harmless; use ThroatDiscEnabled and MouthDiscEnabled)");
         if (!"throat".equals(victimParts)) l.add("VictimParts (retired: the throat disc swallows)");
         if (!"body,head,throat".equals(othersParts)) l.add("OthersParts (retired: the throat disc swallows)");
@@ -89,7 +90,51 @@ public final class HuntConfig {
 
     // strike (prompt 14)
     /** The odds of the four types, indexed by StrikeType (crest, crash, emerge, engulf); rescaled over the available ones. */
+    /** RETIRED (prompt 19): the single weight set of prompts 14 to 18; only read to warn. */
     public double[] strikeWeights = {30, 25, 25, 20};
+
+    /** The weights per size [small, medium, large, huge][crest, crash, emerge, engulf] (prompt 19). */
+    public static final double[][] DEFAULT_WEIGHTS = {{10, 70, 10, 10}, {70, 5, 5, 20}, {70, 5, 5, 20}, {0, 0, 0, 100}};
+    public double[][] strikeWeightsBySize = {DEFAULT_WEIGHTS[0].clone(), DEFAULT_WEIGHTS[1].clone(), DEFAULT_WEIGHTS[2].clone(), DEFAULT_WEIGHTS[3].clone()};
+    public String[] fallbackSize = {"small", "medium", "large", "medium"};
+    public String[] fallbackType = {"crash", "crash", "crash", "crash"};
+
+    private static boolean badRow(double[] w) {
+        double sum = 0;
+        for (double v : w) { if (v < 0) return true; sum += v; }
+        return sum <= 0;
+    }
+
+    /** The effective weights of a size [crest, crash, emerge, engulf]: the configured row, or the default row when it is bad (a negative number or a sum of 0). */
+    public double[] weightsFor(SizeTable.Size size) {
+        double[] w = strikeWeightsBySize[size.ordinal()];
+        return badRow(w) ? DEFAULT_WEIGHTS[size.ordinal()].clone() : w.clone();
+    }
+
+    /** One line for every bad weight table or fallback key: what was wrong and what is used instead (logged at start-up). */
+    public java.util.List<String> weightProblems() {
+        java.util.List<String> l = new java.util.ArrayList<>();
+        for (SizeTable.Size s : SizeTable.Size.values()) {
+            if (badRow(strikeWeightsBySize[s.ordinal()])) l.add("StrikeWeights." + s.label + " " + java.util.Arrays.toString(strikeWeightsBySize[s.ordinal()]) + " is refused (a negative number or a sum of 0): the default " + java.util.Arrays.toString(DEFAULT_WEIGHTS[s.ordinal()]) + " is used");
+            if (SizeTable.Size.of(fallbackSize[s.ordinal()].toLowerCase(java.util.Locale.ROOT)) == null) l.add("FallbackSize." + s.label + " '" + fallbackSize[s.ordinal()] + "' is not small, medium, large or huge: the default " + fallbackSizeFor(s).label + " is used");
+            StrikeType t = StrikeType.of(fallbackType[s.ordinal()].toLowerCase(java.util.Locale.ROOT));
+            if (t != StrikeType.CRASH && t != StrikeType.EMERGE) l.add("FallbackType." + s.label + " '" + fallbackType[s.ordinal()] + "' is not crash or emerge (the always available types): crash is used");
+        }
+        return l;
+    }
+
+    /** The size of the strike when no weighted type is available for the event's size. */
+    public SizeTable.Size fallbackSizeFor(SizeTable.Size size) {
+        SizeTable.Size f = SizeTable.Size.of(fallbackSize[size.ordinal()].toLowerCase(java.util.Locale.ROOT));
+        if (f != null) return f;
+        return size == SizeTable.Size.HUGE ? SizeTable.Size.MEDIUM : size;
+    }
+
+    /** The type of that fallback: crash or emerge only (crash otherwise). */
+    public StrikeType fallbackTypeFor(SizeTable.Size size) {
+        StrikeType t = StrikeType.of(fallbackType[size.ordinal()].toLowerCase(java.util.Locale.ROOT));
+        return t == StrikeType.EMERGE ? StrikeType.EMERGE : StrikeType.CRASH;
+    }
     /** The crest corridor per size (small, medium, large, huge): blocks ahead (5.2 W), behind (2 W) and the height tolerance (0.25 W). */
     public int[] crestAhead = {42, 83, 166, 250}, crestBehind = {16, 32, 64, 96}, crestTolerance = {2, 4, 8, 12};
     /** cardinal (one of N E S W) or random (any yaw) for crash, emerge and engulf. */
@@ -116,7 +161,8 @@ public final class HuntConfig {
         l.add("BuildUpFraction=" + buildUpFraction + " BuildUpMaxParticlesPerSecond=" + buildUpMaxParticlesPerSecond);
         l.add("TremorParticleBudgetPerTick=" + tremorParticleBudgetPerTick + "");
         l.add("TremorParticles=" + tremorParticles + " TremorSoundVolume=" + tremorSoundVolume);
-        l.add("StrikeWeights crest=" + strikeWeights[0] + " crash=" + strikeWeights[1] + " emerge=" + strikeWeights[2] + " engulf=" + strikeWeights[3] + " StrikeYawMode=" + strikeYawMode + " ScanColumnsPerTick=" + scanColumnsPerTick);
+        for (SizeTable.Size s : SizeTable.Size.values()) l.add("StrikeWeights." + s.label + " crest=" + weightsFor(s)[0] + " crash=" + weightsFor(s)[1] + " emerge=" + weightsFor(s)[2] + " engulf=" + weightsFor(s)[3] + " FallbackSize=" + fallbackSizeFor(s).label + " FallbackType=" + fallbackTypeFor(s).label);
+        l.add("StrikeYawMode=" + strikeYawMode + " ScanColumnsPerTick=" + scanColumnsPerTick);
         l.add("CrestAhead=" + java.util.Arrays.toString(crestAhead) + " CrestBehind=" + java.util.Arrays.toString(crestBehind) + " CrestTolerance=" + java.util.Arrays.toString(crestTolerance) + " (small, medium, large, huge)");
         String[] mv = {"crest", "crash", "emerge", "engulf"}, sz = {"small", "medium", "large", "huge"};
         l.add("RumbleMaxSixteenths=" + rumbleMaxSixteenths + " RumblePulseSeconds=" + rumblePulseSeconds + " RumbleEdgeWeight=" + rumbleEdgeWeight + " RumbleViewMargin=" + rumbleViewMargin + " RumbleBlockBudgetPerTick=" + rumbleBlockBudgetPerTick + " RumbleDropSteps=" + rumbleDropSteps + " RumbleStepSeconds=" + rumbleStepSeconds + " RumbleSwingSeconds=" + rumbleSwingSeconds + " TremorRadius=" + tremorRadius);
