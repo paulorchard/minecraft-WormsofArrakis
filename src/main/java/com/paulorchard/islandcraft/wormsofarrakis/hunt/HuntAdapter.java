@@ -16,6 +16,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.effect.MobEffect;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -70,9 +72,15 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
     private long lastParticlesMade, lastBlocksSent;
 
     private HuntAdapter() {
-        this.mgr = new HuntManager(cfg, this, (e, v, w, s) -> WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {}", StrikeHook.attackLine(e, w, s)));
+        this.mgr = new HuntManager(cfg, this, this::onAttack);
         mgr.aggro().setEffectProbe(this::hasEffect);
     }
+
+    private volatile FreezeHook freezeHook = FreezeHook.LOGGING;
+    private final Map<UUID, FreezeRun> freezes = new HashMap<>();
+
+    /** The camera prompt plugs in here. */
+    public void setFreezeHook(FreezeHook h) { this.freezeHook = h == null ? FreezeHook.LOGGING : h; }
 
     public HuntManager manager() { return mgr; }
     public HuntConfig config() { return cfg; }
@@ -187,6 +195,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         particleReqs.clear();
         lastBlocksSent = 0;
         mgr.tick(DT, this);
+        tickFreezes();
         stepRipples();
         flushParticles();
     }
@@ -201,7 +210,10 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
     }
 
     @SubscribeEvent
-    public void onLoggedIn(PlayerEvent.PlayerLoggedInEvent e) { mgr.login(e.getEntity().getUUID()); }
+    public void onLoggedIn(PlayerEvent.PlayerLoggedInEvent e) { 
+        mgr.login(e.getEntity().getUUID());
+        if (e.getEntity() instanceof ServerPlayer sp) FreezeRun.clean(sp);   // belt and braces: a modifier left by a crash is removed (they are transient, so none is saved)
+    }
 
     @SubscribeEvent
     public void onDeath(LivingDeathEvent e) { if (e.getEntity() instanceof ServerPlayer sp) mgr.died(sp.getUUID()); }
@@ -246,6 +258,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
 
     @Override
     public void onEnd(HuntEvent e, HuntEvent.EndReason reason) {
+        releaseFreeze(e);
         int restored = cancelRipples(e.id);
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: event {} ended {} (list scores set to 0; {} fake blocks restored)", e.id, reason, restored);
     }
@@ -264,6 +277,94 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         BlockState sand = sandStateUnder(p.level(), p);
         particleReqs.add(new ParticleReq(p.level(), sand, p.getX(), p.getY() + 0.1, p.getZ(), count, 0.7, 0.1, 0.7, 0.12));
     }
+
+    // ---- the freeze (prompt 14 part 1) ----
+
+    /** The start of FREEZE: the log line of prompt 13 (unchanged) and the victim is held. */
+    private void onAttack(HuntEvent e, UUID victim, double w, String sizeName) {
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {}", StrikeHook.attackLine(e, w, sizeName));
+        ServerPlayer p = online.get(victim);
+        if (p == null) return;
+        FreezeRun run = new FreezeRun(p, e);
+        freezes.put(victim, run);
+        run.freeze.tick(0);   // nothing moves yet, but the jump block applies from this very tick
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: freeze start victim={} for {} s (speed cut linearly to zero, jumping blocked, held on the spot); nothing else of the world is changed", p.getGameProfile().name(), trim(e.attackSeconds));
+        freezeHook.onFreezeStart(victim, e);
+    }
+
+    private void tickFreezes() {
+        for (FreezeRun r : new ArrayList<>(freezes.values())) {
+            ServerPlayer cur = online.get(r.victim);
+            if (cur != null && cur != r.player) r.player = cur;   // a new object after a respawn: nothing to hold
+            if (r.event.phase() == HuntEvent.Phase.FREEZE || r.event.phase() == HuntEvent.Phase.STRIKE) r.freeze.tick(r.event.phase() == HuntEvent.Phase.FREEZE ? DT : 0);
+        }
+    }
+
+    private void releaseFreeze(HuntEvent e) {
+        if (e.victim() == null) return;
+        FreezeRun r = freezes.remove(e.victim());
+        if (r == null) return;
+        r.freeze.release();
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: freeze end victim={} (modifiers removed)", e.victimName());
+        freezeHook.onFreezeEnd(e.victim(), e);
+    }
+
+    public boolean frozen(UUID id) { FreezeRun r = freezes.get(id); return r != null && r.freeze.started() && !r.freeze.released(); }
+
+    /** The attribute modifiers and the hold of one frozen victim. */
+    private static final class FreezeRun implements Freeze.Body {
+        static final Identifier SPEED = Identifier.fromNamespaceAndPath(WormsOfArrakis.MOD_ID, "freeze_speed");
+        static final Identifier JUMP = Identifier.fromNamespaceAndPath(WormsOfArrakis.MOD_ID, "freeze_jump");
+        final UUID victim;
+        final HuntEvent event;
+        ServerPlayer player;
+        final Freeze freeze;
+        double ax, az;
+        boolean anchored;
+        int lastLogged = -1;
+
+        FreezeRun(ServerPlayer p, HuntEvent e) {
+            this.victim = p.getUUID();
+            this.event = e;
+            this.player = p;
+            this.freeze = new Freeze(e.attackSeconds, this);
+        }
+
+        static void clean(ServerPlayer p) {
+            var sp = p.getAttribute(Attributes.MOVEMENT_SPEED);
+            if (sp != null) sp.removeModifier(SPEED);
+            var ju = p.getAttribute(Attributes.JUMP_STRENGTH);
+            if (ju != null) ju.removeModifier(JUMP);
+        }
+
+        @Override public void apply(double cut, boolean jumpBlocked) {
+            var sp = player.getAttribute(Attributes.MOVEMENT_SPEED);
+            if (sp != null) {
+                sp.removeModifier(SPEED);
+                if (cut > 0) sp.addTransientModifier(new AttributeModifier(SPEED, -cut, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL));
+            }
+            var ju = player.getAttribute(Attributes.JUMP_STRENGTH);
+            if (ju != null && jumpBlocked && !ju.hasModifier(JUMP)) ju.addTransientModifier(new AttributeModifier(JUMP, -1.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL));
+            if (player.isPassenger()) player.stopRiding();   // dismounted at the start and never allowed to mount again
+            if (player.isFallFlying()) player.stopFallFlying();
+            int tenth = (int) Math.floor(cut * 4);
+            if (tenth != lastLogged) { lastLogged = tenth; WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: freeze {} cut={}% of the speed", player.getGameProfile().name(), Math.round(cut * 100)); }
+        }
+
+        @Override public void hold() {
+            if (!anchored) { anchored = true; ax = player.getX(); az = player.getZ(); return; }
+            double d = Math.hypot(player.getX() - ax, player.getZ() - az);
+            if (d > FREEZE_HOLD_TOLERANCE) {
+                player.connection.teleport(ax, player.getY(), az, player.getYRot(), player.getXRot());   // pushed or pearled away: put back on the spot (only past the tolerance)
+                WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: freeze {} was moved {} blocks from the spot, put back", player.getGameProfile().name(), trim(d));
+            }
+        }
+
+        @Override public void release() { clean(player); }
+    }
+
+    /** Past this distance (blocks) from the spot a held victim is put back; below it nothing is done (no rubber band for a nudge). */
+    public static final double FREEZE_HOLD_TOLERANCE = 0.6;
 
     // ---- tremors ----
 

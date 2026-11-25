@@ -394,7 +394,7 @@ class Prompt13Test {
             assertEquals("bob", att.get(0)[0]);
             assertEquals(size.label, att.get(0)[1]);
             assertEquals(size.width, (double) att.get(0)[2]);
-            assertEquals(HuntEvent.Phase.ATTACK, e.phase());
+            assertEquals(HuntEvent.Phase.FREEZE, e.phase());
             double ta = 0;
             while (!e.ended()) { m.tick(DT, w); ta += DT; assertTrue(ta < 5); }
             assertEquals(4, ta, 0.1, "the 4 s placeholder");

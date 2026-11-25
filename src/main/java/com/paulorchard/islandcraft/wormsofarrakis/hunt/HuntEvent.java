@@ -9,11 +9,11 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Prompt 13 part 4: one event, a state machine, engine-free. STALKING (width + StalkExtraSeconds) then ATTACK (AttackSeconds, a placeholder: the victim is chosen and
- * {@link StrikeHook#onAttack} is called) then ENDED. The list is fixed at the lock; members can only leave. The size and the stalk length never change.
+ * Prompt 13 part 4 and prompt 14: one event, a state machine, engine-free. STALKING (width + StalkExtraSeconds) then FREEZE (AttackSeconds: the victim is chosen,
+ * {@link StrikeHook#onAttack} is called and the victim is held; formerly ATTACK) then STRIKE (the move runs, the event waits for it) then ENDED. The list is fixed at the lock; members can only leave. The size and the stalk length never change.
  */
 public final class HuntEvent {
-    public enum Phase { STALKING, ATTACK, ENDED }
+    public enum Phase { STALKING, FREEZE, STRIKE, ENDED }
     public enum EndReason { DONE, FIZZLED, STOPPED }
 
     /** What the event asks of the world about its members. */
@@ -80,16 +80,16 @@ public final class HuntEvent {
     public List<UUID> members() { return new ArrayList<>(members); }
     public boolean has(UUID id) { return members.contains(id); }
     public Tremor.Clock clockOf(UUID id) { return clocks.get(id); }
-    /** The fraction of the stalk elapsed, 0 to 1 (1 during ATTACK). */
+    /** The fraction of the stalk elapsed, 0 to 1 (1 after it). */
     public double progress() { return phase == Phase.STALKING ? Math.min(1, phaseTime / stalkSeconds) : 1; }
-    public double secondsLeft() { return phase == Phase.STALKING ? Math.max(0, stalkSeconds - phaseTime) : phase == Phase.ATTACK ? Math.max(0, attackSeconds - phaseTime) : 0; }
+    public double secondsLeft() { return phase == Phase.STALKING ? Math.max(0, stalkSeconds - phaseTime) : phase == Phase.FREEZE ? Math.max(0, attackSeconds - phaseTime) : 0; }
 
     /** A member leaves (log-off, death, mode, dimension). Nobody joins later. An empty list ends the event FIZZLED. */
     public void removeMember(UUID id) {
         if (ended() || !members.remove(id)) return;
         clocks.remove(id);
         buildAcc.remove(id);
-        if (members.isEmpty()) end(EndReason.FIZZLED);
+        if (members.isEmpty() || (phase == Phase.FREEZE && id.equals(victim))) end(EndReason.FIZZLED);   // the victim leaves during the freeze: no strike
     }
 
     /** The victim: the highest score among the members on sand right now; ties go to the one who gained most recently. Null when nobody is on sand. */
@@ -132,12 +132,12 @@ public final class HuntEvent {
                 victimName = v.name(vic);
                 victimScore = v.score(vic);
                 Phase from = phase;
-                phase = Phase.ATTACK;
+                phase = Phase.FREEZE;
                 phaseTime = 0;
                 hooks.onPhaseChange(this, from, phase);
                 strike.onAttack(this, victim, width, size.label);
             }
-        } else if (phase == Phase.ATTACK) {
+        } else if (phase == Phase.FREEZE) {
             hooks.onTick(this);
             if (phaseTime >= attackSeconds - 1e-9) end(EndReason.DONE);
         }
