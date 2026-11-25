@@ -230,8 +230,8 @@ public final class RumbleManager {
                 long ck = net.minecraft.world.level.ChunkPos.pack(x >> 4, z >> 4);
                 ChunkAccess ch = chunks.computeIfAbsent(ck, k -> level.getChunkSource().getChunkNow(x >> 4, z >> 4));
                 if (ch == null) continue;
-                int h = ch.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-                for (int y = h - 1; y >= h - 4; y--) {
+                int top = ch.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);   // ChunkAccess.getHeight: the y of the top block (Level.getHeight is one more)
+                for (int y = top; y >= top - 3; y--) {
                     BlockPos pos = new BlockPos(x, y, z);
                     BlockState st = ch.getBlockState(pos);
                     if (st.isAir()) continue;

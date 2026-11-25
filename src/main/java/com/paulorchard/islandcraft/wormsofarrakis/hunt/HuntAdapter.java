@@ -213,6 +213,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         particleReqs.clear();
         mgr.tick(DT, this);
         tickFreezes();
+        playRoarShots();
         strikes.tick();
         flushParticles();
     }
@@ -253,13 +254,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: event {} started on {}: {} worm W{} ({}), stalk {} s, list {} ({})", e.id, t.name(), e.size.label, trim(e.width), "size factor " + fmt(e.factor), trim(e.stalkSeconds),
                 e.members().size(), names(e.members()));
         if (p == null) return;
-        ServerLevel level = p.level();
-        double f = e.factor;
-        SoundEvent boom = sound("entity.generic.explode");
-        if (boom != null) level.playSound(null, p.getX(), p.getY(), p.getZ(), boom, SoundSource.HOSTILE, (float) Math.max(1.0, 3.0 * f), 0.5f);
-        BlockState sand = sandStateUnder(level, p);
-        int count = (int) Math.max(4, Math.round(60 * f));
-        level.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, sand), p.getX(), p.getY() + 0.3, p.getZ(), count, 0.5 + 1.5 * f, 0.2, 0.5 + 1.5 * f, 0.05);
+        playRoar(p, e.size, e.id * 0x9E3779B97F4A7C15L ^ t.id().getLeastSignificantBits());   // the only thing that plays at the start (prompt 15 part 4): no explosion, no puff
     }
 
     @Override
@@ -396,6 +391,68 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
 
     /** Past this distance (blocks) from the spot a held victim is put back; below it nothing is done (no rubber band for a nudge). */
     public static final double FREEZE_HOLD_TOLERANCE = 0.6;
+
+    // ---- the distant roar (prompt 15 part 4) ----
+
+    private record RoarShot(ServerLevel level, double x, double y, double z, long due, String sound, float volume, float pitch) {}
+
+    private final List<RoarShot> roarQueue = new ArrayList<>();
+    private long roarTick;
+
+    /** The roar of an event of this size for this player: one shared origin at RoarDistance on a bearing seeded by the event; the volume is computed so the range reaches the player with the margin. */
+    public void playRoar(ServerPlayer p, SizeTable.Size size, long seed) {
+        ServerLevel level = p.level();
+        double d = Roar.distance(size, cfg);
+        double b0 = Roar.bearing(seed);
+        double bearing = b0;
+        double[] xz = Roar.origin(p.getX(), p.getZ(), b0, d);
+        Double oy = null;
+        // ground level on sand where possible: the seeded bearing first, then the seven others 45 degrees apart (only loaded chunks are read, none is loaded)
+        for (int k = 0; k < 8 && oy == null; k++) {
+            double b = (b0 + 45.0 * k) % 360.0;
+            double[] c = Roar.origin(p.getX(), p.getZ(), b, d);
+            Double y = sandTop(level, (int) Math.floor(c[0]), (int) Math.floor(c[1]));
+            if (y != null) { oy = y; xz = c; bearing = b; }
+        }
+        if (oy == null) {
+            Double y = surfaceTop(level, (int) Math.floor(xz[0]), (int) Math.floor(xz[1]));
+            oy = y != null ? y : p.getY();
+        }
+        double volume = Roar.volume(d, cfg.roarRangeMargin);
+        double pitchFactor = cfg.roarFarPitch;
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {}", Roar.line(xz[0], oy, xz[1], bearing, d, volume, size));
+        List<Roar.Shot> shots = Roar.shots(volume, pitchFactor, seed);
+        double lowest = Double.MAX_VALUE;
+        for (Roar.Shot s : shots) lowest = Math.min(lowest, s.pitch());
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: roar {} sounds over {} s, pitch x{} ({} the game's minimum 0.5), heard within {} blocks of the origin (loudness at the trigger player {})", shots.size(), fmt(shots.get(shots.size() - 1).t()),
+                fmt(pitchFactor), lowest < Roar.MIN_PITCH ? "some below" : "none below", trim(Roar.range(volume)), fmt(Roar.loudness(d, volume)));
+        for (Roar.Shot s : shots) roarQueue.add(new RoarShot(level, xz[0], oy, xz[1], roarTick + Math.round(s.t() / DT), s.sound(), (float) s.volume(), (float) Roar.playedPitch(s.pitch())));
+    }
+
+    /** The y above the top block when the top block of the column is sand and its chunk is loaded; else null. */
+    private Double sandTop(ServerLevel level, int x, int z) {
+        var ch = level.getChunkSource().getChunkNow(x >> 4, z >> 4);
+        if (ch == null) return null;
+        int top = ch.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);   // the y of the top block
+        return isSandBlock(ch.getBlockState(new BlockPos(x, top, z))) ? Double.valueOf(top + 1) : null;
+    }
+
+    private Double surfaceTop(ServerLevel level, int x, int z) {
+        var ch = level.getChunkSource().getChunkNow(x >> 4, z >> 4);
+        return ch == null ? null : Double.valueOf(ch.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) + 1);
+    }
+
+    private void playRoarShots() {
+        roarTick++;
+        if (roarQueue.isEmpty()) return;
+        for (var it = roarQueue.iterator(); it.hasNext(); ) {
+            RoarShot s = it.next();
+            if (s.due() > roarTick) continue;
+            it.remove();
+            SoundEvent ev = sound(s.sound());
+            if (ev != null) s.level().playSound(null, s.x(), s.y(), s.z(), ev, SoundSource.HOSTILE, s.volume(), s.pitch());
+        }
+    }
 
     // ---- tremors ----
 

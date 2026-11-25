@@ -39,6 +39,10 @@ public final class RumbleCommands {
             say(ctx, "rumble stop: " + n + " event(s) stopped, every fake cell restored");
             return n;
         }));
+        // test only (the smoke start has no real player): a rumble centred on the fake player of "hunt fake", who is its only viewer
+        r.then(Commands.literal("fake").executes(ctx -> fake(ctx, D_RADIUS, D_STRENGTH, D_SECONDS))
+                .then(Commands.argument("radius", DoubleArgumentType.doubleArg(-100000, 100000)).then(Commands.argument("strength", DoubleArgumentType.doubleArg(-1000, 1000))
+                        .then(Commands.argument("seconds", DoubleArgumentType.doubleArg(-100000, 100000)).executes(ctx -> fake(ctx, DoubleArgumentType.getDouble(ctx, "radius"), DoubleArgumentType.getDouble(ctx, "strength"), DoubleArgumentType.getDouble(ctx, "seconds")))))));
         r.then(Commands.literal("status").executes(ctx -> { say(ctx, RumbleManager.instance().status()); return 1; }));
         r.then(Commands.literal("gallery").executes(RumbleCommands::gallery));
         root.then(r);
@@ -61,6 +65,14 @@ public final class RumbleCommands {
         final double sf = s;
         Rumble.Params params = Rumble.Params.of(radius, seconds).withStrength(t -> sf);
         return start(ctx, p, params, nearby, "strength " + String.format(Locale.ROOT, "%.2f", s));
+    }
+
+    private static int fake(CommandContext<CommandSourceStack> ctx, double radius, double strength, double seconds) throws CommandSyntaxException {
+        ServerPlayer p = com.paulorchard.islandcraft.wormsofarrakis.hunt.HuntAdapter.instance().fakePlayerOrNull();
+        if (p == null) throw new com.mojang.brigadier.exceptions.SimpleCommandExceptionType(Component.literal("no fake player: hunt fake <x> <y> <z> first")).create();
+        double s = Math.max(0, Math.min(1, strength));
+        final double sf = s;
+        return start(ctx, p, Rumble.Params.of(radius, seconds).withStrength(t -> sf), false, "strength " + String.format(Locale.ROOT, "%.2f", s));
     }
 
     private static int ramp(CommandContext<CommandSourceStack> ctx, double radius, double seconds) throws CommandSyntaxException {

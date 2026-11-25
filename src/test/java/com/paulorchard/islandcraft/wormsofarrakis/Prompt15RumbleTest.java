@@ -383,4 +383,63 @@ class Prompt15RumbleTest {
         assertTrue(h.sends <= (c.totalUpdates + 1) * 3, "one send per viewer per tick (not per cell): " + h.sends + " sends for " + c.totalUpdates + " updates");
         assertEquals(0, h.shownAll());
     }
+
+    /** Counts what the real sender would send: one packet per chunk section per viewer, sized as the vanilla codec writes it. */
+    static final class CountingHost implements RumbleCore.Host {
+        long bytes, cells, sends;
+        @Override public int realState(int x, int y, int z) { return 1; }
+        @Override public int fakeState(int level) { return 20000 + level; }   // block state ids of this mod are in the tens of thousands: 3 bytes as a varint, 5 as the varlong with the position
+        @Override public boolean raiseBlocked(UUID v, int x, int y, int z, int level) { return false; }
+        @Override public boolean lowerBlocked(UUID v, int x, int z, int sy) { return false; }
+        @Override public boolean cellFree(int x, int y, int z) { return true; }
+        @Override public int send(UUID v, List<long[]> changes) {
+            Map<Long, List<Integer>> bySection = new HashMap<>();
+            for (long[] c : changes) bySection.computeIfAbsent(((long) (RumbleCore.ux(c[0]) >> 4) << 32) ^ (RumbleCore.uz(c[0]) >> 4) ^ ((long) (RumbleCore.uy(c[0]) >> 4) << 56), k -> new ArrayList<>()).add((int) c[1]);
+            int b = 0;
+            for (List<Integer> l : bySection.values()) { b += RumbleCore.packetBytes(l.stream().mapToInt(Integer::intValue).toArray()); sends++; }
+            bytes += b;
+            cells += changes.size();
+            return b;
+        }
+    }
+
+    @Test
+    void numbersForTheReport() throws Exception {
+        StringBuilder out = new StringBuilder();
+        out.append("radius viewers: peak cell updates in a tick, packets per tick (peak), bytes per tick (peak), cells per viewer per second, core milliseconds per tick (mean / max, server thread, without the packet objects)\n");
+        for (int radius : new int[]{6, 12, 40}) for (int viewers : new int[]{1, 5, 20}) {
+            double bestMean = 1e9, bestMax = 1e9;
+            long peakBytes = 0, peakSends = 0;
+            int peakUpdates = 0;
+            double cellsPerViewerSecond = 0;
+            for (int round = 0; round < 3; round++) {   // the third round is the warm one
+                CountingHost h = new CountingHost();
+                RumbleCore c = new RumbleCore(h, 600, 3.0, s -> {});
+                List<UUID> vs = new ArrayList<>();
+                for (int i = 0; i < viewers; i++) vs.add(new UUID(1, i));
+                c.start(sched(radius, 4, 8, 99), 0.5, 0.5, grid(radius), vs, 0);
+                double sum = 0, max = 0;
+                long prevBytes = 0, prevSends = 0, pb = 0, ps = 0;
+                for (long t = 1; t <= 80; t++) {
+                    long t0 = System.nanoTime();
+                    c.tick(t);
+                    double ms = (System.nanoTime() - t0) / 1e6;
+                    sum += ms; max = Math.max(max, ms);
+                    pb = Math.max(pb, h.bytes - prevBytes); ps = Math.max(ps, h.sends - prevSends);
+                    prevBytes = h.bytes; prevSends = h.sends;
+                }
+                if (sum / 80 < bestMean) { bestMean = sum / 80; bestMax = max; peakBytes = pb; peakSends = ps; peakUpdates = c.peakUpdates; cellsPerViewerSecond = h.cells / (double) viewers / 4.0; }
+            }
+            out.append(String.format(java.util.Locale.ROOT, "r%-2d x%-2d viewers: %4d updates, %3d packets, %6d bytes, %6.0f cells/viewer/s, %.3f / %.3f ms%n", radius, viewers, peakUpdates, peakSends, peakBytes, cellsPerViewerSecond, bestMean, bestMax));
+        }
+        for (int radius : new int[]{6, 12, 40}) {   // what the rumble wants per tick with no budget at all (the budget of 600 thins the radius 40 one)
+            CountingHost h = new CountingHost();
+            RumbleCore c = new RumbleCore(h, 1000000, 3.0, s -> {});
+            c.start(sched(radius, 4, 8, 99), 0.5, 0.5, grid(radius), List.of(new UUID(1, 1)), 0);
+            for (long t = 1; t <= 80; t++) c.tick(t);
+            out.append(String.format(java.util.Locale.ROOT, "r%d without any budget: %d columns, peak %d cell updates in a tick, %.0f on average%n", radius, grid(radius).size(), c.peakUpdates, c.totalUpdates / 80.0));
+        }
+        java.nio.file.Files.writeString(java.nio.file.Path.of("build", "prompt15-rumble-numbers.txt"), out.toString());
+        assertTrue(out.length() > 100);
+    }
 }
