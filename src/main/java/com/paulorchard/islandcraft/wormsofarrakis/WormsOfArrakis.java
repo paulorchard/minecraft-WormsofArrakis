@@ -19,6 +19,7 @@ public class WormsOfArrakis {
         container.registerConfig(ModConfig.Type.COMMON, com.paulorchard.islandcraft.wormsofarrakis.hunt.HuntConfigSpec.SPEC);
         com.paulorchard.islandcraft.wormsofarrakis.hunt.HuntAdapter.init();
         LOGGER.info("[WormsOfArrakis] hunt: aggro, sand depth, roster, stalk and tremors loaded (prompt 13); config islandcraft_wormsofarrakis-common.toml; commands under /arrakis_worm_test hunt");
+        com.paulorchard.islandcraft.wormsofarrakis.rumble.RumbleBlocks.init(modBus);
         TestSetup.init(modBus);
     }
 }

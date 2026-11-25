@@ -87,3 +87,11 @@ tasks.withType(Test).configureEach { useJUnitPlatform() }
 
 // Forward the terminal to the dev server console so commands can be piped in (smoke test).
 tasks.matching { it.name == 'runServer' }.configureEach { standardInput = System.in }
+
+// Prompt 15: writes the 15 models and the blockstate of arrakis_rumble_sand (the output is committed; a unit test checks it).
+tasks.register('generateRumbleModels', JavaExec) {
+    dependsOn 'classes'
+    classpath = sourceSets.main.output
+    mainClass = 'com.paulorchard.islandcraft.wormsofarrakis.rumble.RumbleModels'
+    args = ['src/main/resources']
+}

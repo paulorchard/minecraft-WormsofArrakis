@@ -32,5 +32,6 @@
   "islandcraft_wormsofarrakis.hunt.strike.forced": "Strike %s will be used at the end of the freeze%s",
   "islandcraft_wormsofarrakis.hunt.strike.forced_anyway": " (forced although it is not available here: %s)",
   "islandcraft_wormsofarrakis.hunt.strike.needs_size": "strike needs a size (small, medium, large or huge) so the worm is known",
-  "death.attack.islandcraft_wormsofarrakis.swallowed": "%1$s was swallowed by a sandworm"
+  "death.attack.islandcraft_wormsofarrakis.swallowed": "%1$s was swallowed by a sandworm",
+  "block.islandcraft_wormsofarrakis.arrakis_rumble_sand": "Arrakis_Rumble_Sand"
 }

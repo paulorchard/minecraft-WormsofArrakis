@@ -1,0 +1,19 @@
+{
+  "variants": {
+    "level=1": { "model": "islandcraft_wormsofarrakis:block/arrakis_rumble_sand_1" },
+    "level=2": { "model": "islandcraft_wormsofarrakis:block/arrakis_rumble_sand_2" },
+    "level=3": { "model": "islandcraft_wormsofarrakis:block/arrakis_rumble_sand_3" },
+    "level=4": { "model": "islandcraft_wormsofarrakis:block/arrakis_rumble_sand_4" },
+    "level=5": { "model": "islandcraft_wormsofarrakis:block/arrakis_rumble_sand_5" },
+    "level=6": { "model": "islandcraft_wormsofarrakis:block/arrakis_rumble_sand_6" },
+    "level=7": { "model": "islandcraft_wormsofarrakis:block/arrakis_rumble_sand_7" },
+    "level=8": { "model": "islandcraft_wormsofarrakis:block/arrakis_rumble_sand_8" },
+    "level=9": { "model": "islandcraft_wormsofarrakis:block/arrakis_rumble_sand_9" },
+    "level=10": { "model": "islandcraft_wormsofarrakis:block/arrakis_rumble_sand_10" },
+    "level=11": { "model": "islandcraft_wormsofarrakis:block/arrakis_rumble_sand_11" },
+    "level=12": { "model": "islandcraft_wormsofarrakis:block/arrakis_rumble_sand_12" },
+    "level=13": { "model": "islandcraft_wormsofarrakis:block/arrakis_rumble_sand_13" },
+    "level=14": { "model": "islandcraft_wormsofarrakis:block/arrakis_rumble_sand_14" },
+    "level=15": { "model": "islandcraft_wormsofarrakis:block/arrakis_rumble_sand_15" }
+  }
+}

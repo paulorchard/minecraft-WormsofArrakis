@@ -26,7 +26,7 @@ class Prompt13TextTest {
         Map<String, String> file = new LinkedHashMap<>();
         Matcher m = Pattern.compile("\"([^\"]+)\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").matcher(json);
         while (m.find()) file.put(m.group(1), m.group(2));
-        assertEquals(HuntTexts.EN.size() + 1, file.size(), "the hunt keys and the death message");
+        assertEquals(HuntTexts.EN.size() + 2, file.size(), "the hunt keys, the death message and the rumble block name");
         assertEquals(HuntTexts.DEATH_TEXT, file.get(HuntTexts.DEATH_KEY));
         for (Map.Entry<String, String> e : HuntTexts.EN.entrySet()) assertEquals(e.getValue(), file.get(HuntTexts.PREFIX + e.getKey()), e.getKey());
         assertTrue(HuntTexts.PREFIX.startsWith("islandcraft_wormsofarrakis."));
