@@ -85,6 +85,10 @@ public final class HuntEvent {
     public boolean devoured() { return devoured; }
     public String strikeType() { return strikeType; }
     public String strikeDir() { return strikeDir; }
+    private String killCause = "";
+    /** How the victim died: "touch:head at 3.20 s (devour table 4.58 s)" or "backup ..." (empty while alive or when nobody died). */
+    public String killCause() { return killCause; }
+    public void setKillCause(String c) { killCause = c; }
     /** The victim has been devoured (killed); from now on the victim leaving the list does not cancel the event. */
     public void markDevoured() { devoured = true; }
     /** The strike is over (the move has finished): the event ends DONE on the next tick. */

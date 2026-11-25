@@ -59,8 +59,7 @@ public final class WormSkin {
         boolean[] drawn = pose.drawn(r0, surface);
         int first = -1, last = -1;
         for (int k = 0; k < drawn.length; k++) if (drawn[k]) { if (first < 0) first = k; last = k; }
-        ChainMath chain = pose.chain(r0);
-        shift(chain, offsets);
+        ChainMath chain = bodyChain(pose, r0, offsets);
         if (first < 0) return new WormSkin(pose, chain, drawn, 0, -1, new ShingleMath.Result(), 0, new ShingleMath.Result());
         int from = Math.max(0, first - 1), to = Math.min(pose.segments - 1, last + 1);
         // prompt 08: every ring takes the one uniform roll that puts the upper jaw on top; the mouth itself (shell, throat, teeth) is HeadMouth,
@@ -78,6 +77,13 @@ public final class WormSkin {
         }
         ShingleMath.Result res = toBody >= from ? ShingleMath.build(chain, n, r0, 1, options.withRoll(HeadMouth.roll(n)), from, toBody) : new ShingleMath.Result();
         return new WormSkin(pose, chain, drawn, from, toBody >= from ? toBody : to, res, 0, tail);
+    }
+
+    /** The chain of the body skin: the pose's spine with the uniform ring radius and the sway offsets on every joint (also what the hazard of prompt 16 reads, so there is one pose). */
+    public static ChainMath bodyChain(WormPose pose, double r0, double[][] offsets) {
+        ChainMath chain = pose.chain(r0);
+        shift(chain, offsets);
+        return chain;
     }
 
     private static void shift(ChainMath c, double[][] offsets) {

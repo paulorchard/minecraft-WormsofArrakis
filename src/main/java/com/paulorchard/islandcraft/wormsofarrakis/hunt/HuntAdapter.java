@@ -76,6 +76,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
     }
 
     private final StrikeRunner strikes = new StrikeRunner(this);
+    private final HazardRunner hazard = new HazardRunner(this, strikes);
     private volatile FreezeHook freezeHook = FreezeHook.LOGGING;
     private final Map<UUID, FreezeRun> freezes = new HashMap<>();
     private final List<ServerPlayer> extra = new ArrayList<>();
@@ -216,6 +217,8 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         tickAttackRumbles();
         playRoarShots();
         strikes.tick();
+        hazard.purge();
+        hazard.drawDebug();
         flushParticles();
     }
 
@@ -335,6 +338,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
     public boolean isSandBlock(BlockState st) { return sandSet.contains(st.getBlock()); }
     Integer surfaceOf(UUID id) { return surface.get(id); }
     StrikeRunner strikes() { return strikes; }
+    HazardRunner hazard() { return hazard; }
     MinecraftServer server() { return server; }
 
     public boolean frozen(UUID id) { FreezeRun r = freezes.get(id); return r != null && r.freeze.started() && !r.freeze.released(); }

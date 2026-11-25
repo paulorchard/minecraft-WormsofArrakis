@@ -87,6 +87,7 @@ final class TestCommand {
         // A bare number keeps its old meaning by position (crest: height, speed; emerge: n, angle, speed, hold; crash: height; engulf: exposed).
         com.paulorchard.islandcraft.wormsofarrakis.hunt.HuntCommands.attach(root);
         com.paulorchard.islandcraft.wormsofarrakis.rumble.RumbleCommands.attach(root);
+        com.paulorchard.islandcraft.wormsofarrakis.hunt.HazardCommands.attach(root);
         root.then(Commands.literal("moves").executes(ctx -> {
             for (String line : MoveOptions.movesText()) notice(ctx, line);
             return MoveOptions.MOVES.size();

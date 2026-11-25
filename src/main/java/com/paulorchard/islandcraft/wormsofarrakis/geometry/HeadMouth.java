@@ -161,6 +161,41 @@ public final class HeadMouth {
         return m;
     }
 
+    /** Prompt 16: the outer skin triangles of the three flaps at an opening angle, as the mandible shell is built (same ring, same apex rule, same sign rule), without building the shell. */
+    public static final class Flaps {
+        /** arc[j] = the hinge vertices of flap j (local frame), apex[j] = its open apex, normal[j][f] = the outward unit normal of triangle f (arc[f], arc[f + 1], apex), thickness = the shell thickness. */
+        public final double[][][] arc = new double[FLAPS][][];
+        public final double[][] apex = new double[FLAPS][];
+        public final double[][][] normal = new double[FLAPS][][];
+        public double thickness;
+    }
+
+    public static Flaps flaps(double width, int n, double R, double delta0, double coneH, double openDeg) {
+        Flaps m = new Flaps();
+        m.thickness = thickness(width);
+        double[][] v = ring(n, R, delta0);
+        double[] apexC = {0, 0, coneH};
+        int[] sz = HeadFlaps.split(n);
+        int at = 0;
+        for (int j = 0; j < FLAPS; j++) {
+            int i0 = at, k = sz[j];
+            at += k;
+            double[][] arc = new double[k + 1][];
+            for (int a = 0; a <= k; a++) arc[a] = v[i0 + a];
+            double[] mid = new double[3];
+            for (double[] p : arc) for (int c = 0; c < 3; c++) mid[c] += p[c] / (k + 1);
+            double[] outward = norm(new double[]{mid[0], mid[1], 0});
+            double[] apex = HeadFlaps.openApex(apexC, arc[0], arc[k], outward, Math.toRadians(openDeg), null);
+            double[] sgn = signs(arc, apexC);
+            double[][] tn = new double[k][];
+            for (int f = 0; f < k; f++) tn[f] = scale(norm(cross(sub(arc[f + 1], arc[f]), sub(apex, arc[f]))), sgn[f]);
+            m.arc[j] = arc;
+            m.apex[j] = apex;
+            m.normal[j] = tn;
+        }
+        return m;
+    }
+
     // ---------------------------------------------------------------------------------------------------------------- throat
 
     /** The fixed throat: the same three arcs with the apex at {@link #THROAT_APEX_R} ring radii, flat grey, never animated, plus its teeth. */
@@ -278,7 +313,7 @@ public final class HeadMouth {
     }
 
     /** Per triangle: +1 when the cross product of (v[f+1] - v[f]) x (apex - v[f]) already points away from the axis, else -1 (read from the closed layout). */
-    private static double[] signs(double[][] arc, double[] apexClosed) {
+    static double[] signs(double[][] arc, double[] apexClosed) {
         double[] s = new double[arc.length - 1];
         for (int f = 0; f < s.length; f++) {
             double[] nrm = cross(sub(arc[f + 1], arc[f]), sub(apexClosed, arc[f]));

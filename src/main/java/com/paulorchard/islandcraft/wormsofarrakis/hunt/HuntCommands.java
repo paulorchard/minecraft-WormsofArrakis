@@ -118,6 +118,7 @@ public final class HuntCommands {
                 say(ctx, tr("status.member", name, HuntAdapter.trim(Math.round(a.manager().aggro().getAggro(u))), s != null && s.onSand() ? tr("on_sand").getString() : tr("off_sand").getString()));
             }
             if (e.victim() != null) say(ctx, tr("status.victim", e.victimName(), HuntAdapter.trim(Math.round(e.victimScore()))));
+            if (!e.killCause().isEmpty()) say(ctx, Component.literal("  the victim died by " + e.killCause() + (e.killCause().startsWith("backup") ? " (the worm never touched them)" : " (the worm touched them)")));
         }
         if (ctx.getSource().getEntity() instanceof ServerPlayer p) {
             AggroEngine g = a.manager().aggro();

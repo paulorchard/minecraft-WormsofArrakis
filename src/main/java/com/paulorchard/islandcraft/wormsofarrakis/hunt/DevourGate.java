@@ -14,6 +14,9 @@ public final class DevourGate {
 
     public boolean done() { return done; }
 
+    /** Prompt 16: the worm touched the victim (or they were killed some other way): there is no backup kill any more. */
+    public void touched() { done = true; }
+
     public Action check(double wormAgeTicks, boolean victimPresent) {
         if (done || wormAgeTicks < devourTicks) return Action.WAIT;
         done = true;

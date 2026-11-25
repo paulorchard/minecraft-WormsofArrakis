@@ -1,6 +1,7 @@
 package com.paulorchard.islandcraft.wormsofarrakis.hunt;
 
 import com.paulorchard.islandcraft.wormsofarrakis.WormsOfArrakis;
+import com.paulorchard.islandcraft.wormsofarrakis.hazard.HazardRules;
 import com.paulorchard.islandcraft.wormsofarrakis.path.Moves;
 import com.paulorchard.islandcraft.wormsofarrakis.test.MoveFactory;
 import com.paulorchard.islandcraft.wormsofarrakis.test.TestWormEntity;
@@ -62,21 +63,24 @@ final class StrikeRunner {
     }
 
     /** One strike in progress. */
-    private static final class Run {
+    static final class Run {
         final HuntEvent event;
         final UUID victim;
         final StrikeType type;
         final DevourGate gate;
+        final double devourSeconds, backupSeconds;
         TestWormEntity worm;
         boolean devoured;
         int ticks;
         ServerLevel level;
 
-        Run(HuntEvent event, UUID victim, StrikeType type, double devourSeconds) {
+        Run(HuntEvent event, UUID victim, StrikeType type, double devourSeconds, double backupSeconds) {
+            this.devourSeconds = devourSeconds;
+            this.backupSeconds = backupSeconds;
             this.event = event;
             this.victim = victim;
             this.type = type;
-            this.gate = new DevourGate(devourSeconds);
+            this.gate = new DevourGate(devourSeconds + backupSeconds);
         }
     }
 
@@ -189,7 +193,7 @@ final class StrikeRunner {
             if (!r.devoured && !gone) {
                 ServerPlayer vic = a.player(r.victim);
                 DevourGate.Action act = r.gate.check(r.worm.tickCount, vic != null && vic.isAlive() && !vic.isCreative() && !vic.isSpectator());
-                if (act == DevourGate.Action.KILL) devour(r);
+                if (act == DevourGate.Action.KILL) devour(r, null, r.worm.tickCount / 20.0);
                 else if (act == DevourGate.Action.SKIP) {
                     r.devoured = true;
                     r.event.markDevoured();
@@ -198,7 +202,7 @@ final class StrikeRunner {
             }
             if (gone) {
                 if (!r.devoured) { WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: the worm is gone before the devour moment (victim not killed)"); }
-                WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: the move has finished after {} ticks; the event ends", r.ticks);
+                WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: the move has finished after {} ticks; the event ends", r.ticks + (r.event.killCause().isEmpty() ? "" : "; the victim died by " + r.event.killCause()));
                 r.event.finishStrike();
             }
         }
@@ -243,9 +247,10 @@ final class StrikeRunner {
             return;
         }
         double devour = a.config().devourSeconds[c.type().ordinal()][e.size.ordinal()];
-        Run r = new Run(e, e.victim(), c.type(), devour);
+        Run r = new Run(e, e.victim(), c.type(), devour, a.config().throatBackupSeconds);
         r.worm = worm;
         r.level = level;
+        worm.markStrikeWorm();
         runs.put(e.id, r);
         e.setStrikeInfo(c.type().label, c.dir() == null ? "-" : c.dir().name());
         e.setStrikeLimit(plan.playTime() + MoveFactory.REMOVE_MARGIN + END_MARGIN);
@@ -262,7 +267,7 @@ final class StrikeRunner {
 
     // ---- the devour ----
 
-    private DamageSource swallowed(ServerLevel level) {
+    DamageSource swallowed(ServerLevel level) {
         try {
             Holder<DamageType> h = level.registryAccess().lookupOrThrow(Registries.DAMAGE_TYPE).getOrThrow(SWALLOWED);
             return new DamageSource(h);
@@ -272,28 +277,43 @@ final class StrikeRunner {
         }
     }
 
-    private void devour(Run r) {
+    /** The strike of a worm entity of the hazard (null when it is not a strike worm of a running event). */
+    Run runOfWorm(TestWormEntity w) {
+        for (Run r : runs.values()) if (r.worm == w) return r;
+        return null;
+    }
+
+    /** The worm touched the victim: the first touch of any part kills them, at the substep in which it happened. */
+    void devourByTouch(Run r, ServerPlayer v, String part, double wormSeconds) {
+        if (r.devoured) return;
+        devour(r, part, wormSeconds);
+    }
+
+    /**
+     * The victim dies: by the first touch of a part of the worm ({@code part} = body, head or throat) or, when the worm never touched them by DevourSeconds + ThroatBackupSeconds, by the backup
+     * ({@code part} = null). The kill itself is the swallow of prompt 14: invisible, damage type swallowed, die if still alive.
+     */
+    private void devour(Run r, String part, double wormSeconds) {
         r.devoured = true;
+        r.gate.touched();      // no backup after a touch (or after the backup itself)
         r.event.markDevoured();   // before the death, so the victim leaving the list is the devour and not a cancel
         ServerPlayer v = a.player(r.victim);
         if (v == null || !v.isAlive() || v.isCreative() || v.isSpectator()) {
-            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: devour moment reached but the victim is gone, dead or no longer hunted; nobody is killed");
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: contact or backup moment reached but the victim is gone, dead or no longer hunted; nobody is killed");
             return;
         }
         ServerLevel level = v.level();
-        DamageSource src = swallowed(level);
-        v.setInvisible(true);   // the body is hidden from now on so no body clips through the worm's skin
-        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: devour {} at {} s after the move started: {} is swallowed (hidden, then killed by {}, which bypasses totems, absorption and armour)", r.type.label, HuntAdapter.fmt(r.worm.tickCount / 20.0), v.getGameProfile().name(), SWALLOWED.identifier());
-        v.hurtServer(level, src, Float.MAX_VALUE);
-        if (v.isAlive()) {
-            v.die(src);   // something cancelled the damage: the death itself is still the swallow
-        }
-        if (v.isAlive()) {
-            v.setInvisible(false);
-            WormsOfArrakis.LOGGER.warn("[WormsOfArrakis] strike: {} could not be killed (damage and death were both refused)", v.getGameProfile().name());
-        }
-        a.stopAttackRumble(r.event, "the victim is dead (devoured)");
+        String who = v.getGameProfile().name();
+        String cause = part == null ? "backup" : "touch:" + part;
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {}", part == null ? HazardRules.backupLine(who, wormSeconds, r.devourSeconds, r.backupSeconds) : HazardRules.killLine(who, part, wormSeconds, r.devourSeconds, "victim"));
+        r.event.setKillCause(cause + String.format(Locale.ROOT, " at %.2f s (devour table %.2f s)", wormSeconds, r.devourSeconds));
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: devour {} at {} s after the move started by {}: {} is swallowed (hidden, then killed by {}, which bypasses totems, absorption and armour)", r.type.label, HuntAdapter.fmt(wormSeconds), part == null ? "the backup (no touch before the devour time plus the backup)" : "contact with the " + part, who, SWALLOWED.identifier());
+        HazardRunner hz = HazardRunner.instance();
+        boolean dead = hz != null ? hz.kill(level, v) : false;
+        if (!dead) WormsOfArrakis.LOGGER.warn("[WormsOfArrakis] strike: {} could not be killed (damage and death were both refused)", who);
+        a.stopAttackRumble(r.event, "the victim is dead (devoured by " + cause + ")");
         a.releaseFreezeOf(r.event);   // the victim is dead: nothing of the freeze stays
+        if (dead && hz != null) hz.victimKilled(level, v, r.worm, wormSeconds);
     }
 
     // ---- the end ----

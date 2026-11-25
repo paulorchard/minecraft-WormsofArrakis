@@ -35,6 +35,13 @@ public class TestWormEntity extends Entity implements GeoEntity {
         this.setNoGravity(true);
     }
 
+    /** Prompt 16: called at the end of every server-side tick of a worm (the hazard of the strike worm and of the test worms). */
+    public static volatile java.util.function.Consumer<TestWormEntity> SERVER_TICK_HOOK;
+    private boolean strikeWorm;
+    /** Prompt 16: the worm of a hunt event's strike (always deadly). */
+    public void markStrikeWorm() { strikeWorm = true; }
+    public boolean isStrikeWorm() { return strikeWorm; }
+
     private String watchedSpec = "";
     private boolean removeAtEnd;
 
@@ -43,6 +50,10 @@ public class TestWormEntity extends Entity implements GeoEntity {
     public void tick() {
         super.tick();
         if (!(this.level() instanceof ServerLevel)) return;
+        var hook = SERVER_TICK_HOOK;
+        if (hook != null) {
+            try { hook.accept(this); } catch (RuntimeException e) { WormsOfArrakis.LOGGER.warn("[WormsOfArrakis] hazard: the tick of worm {} failed: {}", this.getId(), e.toString()); }
+        }
         String sp = getSpecString();
         if (!sp.equals(watchedSpec)) {
             watchedSpec = sp;
