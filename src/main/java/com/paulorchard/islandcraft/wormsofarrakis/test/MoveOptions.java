@@ -163,6 +163,13 @@ public final class MoveOptions {
         return l;
     }
 
+    /** The text of the moves command (prompt 12): the move lines, then the size presets and the new command. */
+    public static List<String> movesText() {
+        List<String> l = new ArrayList<>(lines());
+        l.addAll(Presets.lines());
+        return l;
+    }
+
     private static Key find(List<Key> keys, String name) {
         for (Key k : keys) if (k.name().equals(name)) return k;
         return null;

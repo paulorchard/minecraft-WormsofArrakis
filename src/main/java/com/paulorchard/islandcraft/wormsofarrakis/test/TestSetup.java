@@ -26,6 +26,7 @@ public final class TestSetup {
     public static void init(IEventBus modBus) {
         ENTITIES.register(modBus);
         NeoForge.EVENT_BUS.addListener(TestCommand::onRegisterCommands);
-        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] test content registered: entity arrakis_worm_test, command /arrakis_worm_test");
+        NeoForge.EVENT_BUS.addListener(PresetCommand::onRegisterCommands);
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] test content registered: entity arrakis_worm_test, commands /arrakis_worm_test and /arrakis-worm (the size presets)");
     }
 }

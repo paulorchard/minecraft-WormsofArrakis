@@ -86,7 +86,7 @@ final class TestCommand {
         //   engulf  exposed=2 lean=7 hold=0.5 speed gravity=12 pause=1.5 loop mouth
         // A bare number keeps its old meaning by position (crest: height, speed; emerge: n, angle, speed, hold; crash: height; engulf: exposed).
         root.then(Commands.literal("moves").executes(ctx -> {
-            for (String line : MoveOptions.lines()) notice(ctx, line);
+            for (String line : MoveOptions.movesText()) notice(ctx, line);
             return MoveOptions.MOVES.size();
         }));
         root.then(Commands.literal("crest").then(Commands.argument("width", DoubleArgumentType.doubleArg(1, 128))
@@ -443,7 +443,7 @@ final class TestCommand {
     }
 
     /** Message to the command source (chat) and to the log. */
-    private static void notice(CommandContext<CommandSourceStack> ctx, String msg) {
+    static void notice(CommandContext<CommandSourceStack> ctx, String msg) {
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {}", msg);
         ctx.getSource().sendSuccess(() -> Component.literal(msg), true);
     }
@@ -478,7 +478,7 @@ final class TestCommand {
     }
 
     /** One INFO line with the measured numbers of a move (pure maths, same as the unit tests), then the frame table. */
-    private static void logMove(Moves.Move m, WormSpec s) {
+    static void logMove(Moves.Move m, WormSpec s) {
         double rise = Math.sin(Math.toRadians(ScaleMath.TILT_DEG)) * ScaleMath.SKIN_LENGTH;
         String hl = String.format(Locale.ROOT, "%.2f", HeadSpec.headLength(m.width));
         switch (m.kind) {
@@ -608,7 +608,7 @@ final class TestCommand {
     }
 
     /** Every failure reaches the player in chat as well as the log. */
-    private static int fail(CommandContext<CommandSourceStack> ctx, String msg) {
+    static int fail(CommandContext<CommandSourceStack> ctx, String msg) {
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] refused: {}", msg);
         ctx.getSource().sendFailure(Component.literal(msg));
         return 0;
@@ -731,26 +731,10 @@ final class TestCommand {
                         mouthOpen = v[3] != 0;
                         ms = MoveFactory.spec("proj", width, segs, v[0], v[1], 0, 0, v[2], 0, mouthOpen, true, force, 1.0, 1.0, 1);
                     }
-                    default -> ms = MoveFactory.spec("crash", width, segs, num(ctx, args, "n", 10), num(ctx, args, "angle", 70), num(ctx, args, "speed", 12),
-                            0, num(ctx, args, "gravity", 12), num(ctx, args, "top_speed", 4), mouthOpen, !str(ctx, "ballistic", "on").equals("off"), force, 1.0, 1.0, 1);
+                    default -> ms = ballisticSpec(width, segs, num(ctx, args, "n", 10), num(ctx, args, "angle", 70), num(ctx, args, "speed", 12),
+                            num(ctx, args, "gravity", 12), num(ctx, args, "top_speed", 4), mouthOpen, !str(ctx, "ballistic", "on").equals("off"), force);
                 }
-                Moves.Move mv;
-                try {
-                    mv = MoveFactory.get(ms);
-                } catch (Moves.Rejected rej) {
-                    WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} refused: {}", kind, rej.getMessage());
-                    fail(ctx, (kind + " refused: " + rej.getMessage()));
-                    return 0;
-                }
-                if (!mv.note.isEmpty()) notice(ctx, kind + ": " + mv.note);
-                if ((int) ms.p(8, 0) == MoveFactory.MOUTH_ANIM) {
-                    MouthAnim.Timing g = MoveFactory.mouthTiming(ms);
-                    if (g.clamped()) notice(ctx, String.format(Locale.ROOT, "%s: the rise (%.2f s until the closing ends) is shorter than close_time=%s; the mouth closes in %.2f s instead", kind, g.tEnd(), trim(ms.p(21, MouthAnim.DEFAULT_CLOSE_TIME)), g.closeTime()));
-                }
-                spec = ms;
-                reach = Math.max(25.0, width * 1.2 + 15);
-                axisShift = MoveFactory.centreZ(ms);
-                logMove(mv, ms);
+                return launch(ctx, kind, ms, width);
             }
             case "mouth" -> {
                 if (MOUTH_DISABLED) { fail(ctx, ("mouth arrives with experiment 5")); return 0; }
@@ -766,6 +750,37 @@ final class TestCommand {
                 return 0;
             }
         }
+        return place(ctx, spec, width, reach, axisShift);
+    }
+
+    /** The spec of crasharc (the ballistic move, Moves.crash); the long form of the test command and the presets of prompt 12 both build it here. */
+    static WormSpec ballisticSpec(double width, int segs, double n, double angle, double speed, double gravity, double topSpeed, boolean mouthOpen, boolean ballistic, boolean force) {
+        return MoveFactory.spec("crash", width, segs, n, angle, speed, 0, gravity, topSpeed, mouthOpen, ballistic, force, 1.0, 1.0, 1);
+    }
+
+    /** Builds the move of a spec, tells the player its notes, logs it and places the worm (the long form of the test command and the presets of prompt 12 both end here). */
+    static int launch(CommandContext<CommandSourceStack> ctx, String kind, WormSpec ms, double width) {
+                Moves.Move mv;
+                try {
+                    mv = MoveFactory.get(ms);
+                } catch (Moves.Rejected rej) {
+                    WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {} refused: {}", kind, rej.getMessage());
+                    fail(ctx, (kind + " refused: " + rej.getMessage()));
+                    return 0;
+                }
+                if (!mv.note.isEmpty()) notice(ctx, kind + ": " + mv.note);
+                if ((int) ms.p(8, 0) == MoveFactory.MOUTH_ANIM) {
+                    MouthAnim.Timing g = MoveFactory.mouthTiming(ms);
+                    if (g.clamped()) notice(ctx, String.format(Locale.ROOT, "%s: the rise (%.2f s until the closing ends) is shorter than close_time=%s; the mouth closes in %.2f s instead", kind, g.tEnd(), trim(ms.p(21, MouthAnim.DEFAULT_CLOSE_TIME)), g.closeTime()));
+                }
+        double reach = Math.max(25.0, width * 1.2 + 15);
+        double axisShift = MoveFactory.centreZ(ms);
+        logMove(mv, ms);
+        return place(ctx, ms, width, reach, axisShift);
+    }
+
+    /** In front of the player, across the view; the base level of the sand as set by the base command; adds the entity. */
+    static int place(CommandContext<CommandSourceStack> ctx, WormSpec spec, double width, double reach, double axisShift) {
         CommandSourceStack src = ctx.getSource();
         ServerLevel level = src.getLevel();
         Vec3 pos = src.getPosition();
