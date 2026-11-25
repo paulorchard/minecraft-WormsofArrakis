@@ -49,28 +49,30 @@ public final class DeathCamManager {
         public final ServerPlayer player;
         public final ServerLevel level;
         public final DeathCamEntity entity;
-        public final DeathCam.Setup setup;
+        public final StrikeCam.Path path;
+        public final StrikeCam.Surface surface;
+        public final StrikeCam.Dist dist;
         public final double runSeconds, maxSeconds;
         public final long startTick;
         public long eventId;     // the hunt event whose strike this camera belongs to (the view is given back when it ends), else -1 (a killed player keeps it until Respawn)
         public final boolean preview;
-        public final DeathCam.Radius radius;
         public boolean sent;
-        public DeathCam.Pose last;
+        public StrikeCam.Pose last;
         public double maxStep;
 
-        Session(ServerPlayer p, DeathCamEntity e, DeathCam.Setup s, double run, double max, long start, long eventId, boolean preview, DeathCam.Radius radius) {
+        Session(ServerPlayer p, DeathCamEntity e, StrikeCam.Path path, StrikeCam.Surface surface, StrikeCam.Dist dist, double run, double max, long start, long eventId, boolean preview) {
             this.id = p.getUUID();
             this.player = p;
             this.level = (ServerLevel) p.level();
             this.entity = e;
-            this.setup = s;
+            this.path = path;
+            this.surface = surface;
+            this.dist = dist;
             this.runSeconds = run;
             this.maxSeconds = max;
             this.startTick = start;
             this.eventId = eventId;
             this.preview = preview;
-            this.radius = radius;
         }
     }
 
@@ -80,14 +82,11 @@ public final class DeathCamManager {
     public int started, restored, leakedEntities;
 
     public Session sessionOf(UUID id) { return sessions.get(id); }
+    public java.util.Collection<Session> all() { return new ArrayList<>(sessions.values()); }
     public int running() { return sessions.size(); }
 
     private HuntConfig cfg() { return HuntAdapter.instance().config(); }
 
-    public DeathCam.Params params() {
-        HuntConfig c = cfg();
-        return new DeathCam.Params(c.deathCamDistance.clone(), c.deathCamTurnDegrees, c.lookHeight, c.deathCamHeightFactor, c.deathCamMinHeight, c.deathCamSandClearance, c.deathCamMaxSeconds);
-    }
 
     /** The height of the top of the ground at a column, or NaN when its chunk is not loaded. */
     public static double groundAt(ServerLevel level, double x, double z) {
@@ -110,33 +109,38 @@ public final class DeathCamManager {
     }
 
     /**
-     * Starts the camera for a player. Returns null (and adds the reason to {@code notes}) when it could not be started: the death still happens, the player just sees the normal death screen.
-     * {@code eventId} is the hunt event of a nokill strike (the view is given back when it ends), else -1.
+     * Starts a camera for a player (prompt 18 part 3: framed outside the worm). {@code R}, {@code headLength} and {@code peak} describe the worm (the ring radius, the head length and the highest point
+     * over the move); {@code surface} gives the worm's outer surface for the clearance (null: no worm, a preview). Returns null (and adds the reason to {@code notes}) when it could not be started: the
+     * player then just keeps their view. {@code eventId} is the hunt event whose end gives the view back, else -1.
      */
-    public Session start(ServerPlayer p, double cx, double sandY, double cz, double strikeYawDeg, int sizeIndex, long seed, double runSeconds, double maxSeconds, long eventId, boolean preview, List<String> notes) {
+    public Session start(ServerPlayer p, double cx, double sandY, double cz, double strikeYawDeg, double R, double headLength, double peak, long seed, double runSeconds, StrikeCam.Surface surface,
+                         long eventId, boolean preview, List<String> notes) {
         try {
             if (!(p.level() instanceof ServerLevel level)) return null;
             Session old = sessions.get(p.getUUID());
             if (old != null) restore(old, CameraLifecycle.EndPath.NEW_CAMERA, "a new camera starts");
-            DeathCam.Params prm = params();
-            DeathCam.Radius r = DeathCam.radius(prm, sizeIndex, viewDistanceOf(p));
-            if (r.clamped()) notes.add(String.format(Locale.ROOT, "the orbit radius %.0f is clamped to %.0f blocks = 16 x (view distance %d - 1) so the camera stays inside the area the player has loaded", r.wanted(), r.limit(), viewDistanceOf(p)));
-            DeathCam.Setup setup = DeathCam.setup(prm, cx, sandY, cz, strikeYawDeg, r.value(), seed);
-            DeathCam.Pose p0 = DeathCam.pose(setup, 0, runSeconds, (x, z) -> groundAt(level, x, z));
+            StrikeCam.Params prm = cfg().strikeCam();
+            StrikeCam.Dist dist = StrikeCam.distance(prm, R, headLength, peak, viewDistanceOf(p));
+            if (dist.cappedMax()) notes.add(String.format(Locale.ROOT, "the camera distance %.1f is capped to StrikeCamMaxDistance %.0f", dist.wanted(), prm.maxDistance()));
+            if (dist.cappedView()) notes.add(String.format(Locale.ROOT, "the camera distance %.1f is clamped to %.0f blocks = 16 x (view distance %d - 1) so the camera stays inside the area the player has loaded", Math.min(dist.wanted(), prm.maxDistance()), dist.viewLimit(), viewDistanceOf(p)));
+            StrikeCam.Path path = new StrikeCam.Path(prm, cx, sandY, cz, strikeYawDeg, dist.value(), dist.clearance(), peak, seed, Math.max(1.0, runSeconds), surface, (x, z) -> groundAt(level, x, z));
+            if (!path.firstSolved) notes.add("the first camera position could not be made " + String.format(Locale.ROOT, "%.1f", dist.clearance()) + " blocks clear of the worm in 20 pushes");
+            StrikeCam.Pose p0 = path.pose(surface, 0);
             DeathCamEntity e = TestSetup.DEATH_CAMERA.get().create(level, EntitySpawnReason.COMMAND);
             if (e == null) throw new IllegalStateException("the camera entity could not be created");
             e.snapTo(p0.x(), p0.y(), p0.z(), p0.yaw(), p0.pitch());
             if (!level.addFreshEntity(e)) throw new IllegalStateException("the camera entity could not be added to the level");
-            Session s = new Session(p, e, setup, runSeconds, maxSeconds, tick, eventId, preview, r);
+            Session s = new Session(p, e, path, surface, dist, Math.max(1.0, runSeconds), prm.maxSeconds(), tick, eventId, preview);
             s.last = p0;
             sessions.put(s.id, s);
             started++;
-            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] camera: start for {} centre ({}, {}, {}) radius {} height {} look-at height {} side {} direction {} turn {} degrees over {} s then hold (limit {} s), camera entity {} at ({}, {}, {}); the view is sent next tick",
-                    p.getGameProfile().name(), f(cx), f(sandY), f(cz), f(r.value()), f(setup.height()), f(setup.lookHeightBlocks()), setup.side() > 0 ? "+" : "-", setup.direction() > 0 ? "counter-clockwise" : "clockwise", f(prm.turnDegrees()), f(runSeconds), f(maxSeconds), e.getId(), f(p0.x()), f(p0.y()), f(p0.z()));
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] camera: start for {} centre ({}, {}, {}) distance {} (D_base {}, D_fit {}, clearance n {}, peak {}) height {} above the ground, look-at height {}, side {} direction {} sweep {} degrees over {} s then hold (limit {} s), camera entity {} at ({}, {}, {}), first position {} clear in {} push(es); the view is sent next tick",
+                    p.getGameProfile().name(), f(cx), f(sandY), f(cz), f(dist.value()), f(dist.base()), f(dist.fit()), f(dist.clearance()), f(peak), f(StrikeCam.heightAbove(prm, peak)), f(prm.lookHeight()), path.side > 0 ? "+" : "-", path.direction > 0 ? "counter-clockwise" : "clockwise",
+                    f(prm.sweepDegrees()), f(Math.max(1.0, runSeconds)), f(prm.maxSeconds()), e.getId(), f(p0.x()), f(p0.y()), f(p0.z()), path.firstSolved ? "is" : "is NOT", path.firstPushes);
             return s;
         } catch (RuntimeException ex) {
             notes.add("the camera could not be started: " + ex);
-            if (!failedOnce) { failedOnce = true; WormsOfArrakis.LOGGER.warn("[WormsOfArrakis] camera: could not start for {}: {} (logged once; the death still happens, the player sees the normal death screen)", p.getGameProfile().name(), ex.toString()); }
+            if (!failedOnce) { failedOnce = true; WormsOfArrakis.LOGGER.warn("[WormsOfArrakis] camera: could not start for {}: {} (logged once; the player keeps their view)", p.getGameProfile().name(), ex.toString()); }
             return null;
         }
     }
@@ -169,8 +173,8 @@ public final class DeathCamManager {
                     continue;
                 }
             }
-            DeathCam.Pose p = DeathCam.pose(s.setup, t, s.runSeconds, (x, z) -> groundAt(s.level, x, z));
-            s.maxStep = Math.max(s.maxStep, DeathCam.step(s.last, p));
+            StrikeCam.Pose p = s.path.step(t, s.surface, (x, z) -> groundAt(s.level, x, z));
+            s.maxStep = Math.max(s.maxStep, Math.sqrt(Math.pow(p.x() - s.last.x(), 2) + Math.pow(p.y() - s.last.y(), 2) + Math.pow(p.z() - s.last.z(), 2)));
             s.last = p;
             s.entity.snapTo(p.x(), p.y(), p.z(), p.yaw(), p.pitch());
             if (s.preview && t >= s.runSeconds) restore(s, CameraLifecycle.EndPath.PREVIEW_OVER, "the preview is over");
@@ -180,12 +184,12 @@ public final class DeathCamManager {
     // ---- the strike camera of a held player (prompt 17 part 0.3) ----
 
     /**
-     * The strike camera starts when the player is held: it orbits THEIR held spot, side-on to the worm (yaw {@code strikeYawDeg}), turning {@code DeathCamTurnDegrees} over the whole run of the move.
-     * Returns null (the reason is logged) when it could not start; the player then just stays held and sees the normal view.
+     * The strike camera of a player the worm has reached (a disc was crossed or the backup came): framed outside the worm round THEIR held spot, side-on to the worm (yaw {@code strikeYawDeg}), sweeping
+     * over the remaining {@code runSeconds} of the move. Returns null (the reason is logged) when it could not start; the player then keeps their view.
      */
-    public Session startStrikeCamera(ServerPlayer sp, double strikeYawDeg, int sizeIndex, long seed, double runSeconds, long eventId) {
+    public Session startStrikeCamera(ServerPlayer sp, double strikeYawDeg, double R, double headLength, double peak, long seed, double runSeconds, StrikeCam.Surface surface, long eventId) {
         List<String> notes = new ArrayList<>();
-        Session s = start(sp, sp.getX(), sp.getY(), sp.getZ(), strikeYawDeg, sizeIndex, seed, Math.max(1.0, runSeconds), params().maxSeconds(), eventId, false, notes);
+        Session s = start(sp, sp.getX(), sp.getY(), sp.getZ(), strikeYawDeg, R, headLength, peak, seed, runSeconds, surface, eventId, false, notes);
         for (String n : notes) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] camera: {}", n);
         return s;
     }

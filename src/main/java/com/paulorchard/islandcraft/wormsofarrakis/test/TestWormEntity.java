@@ -40,6 +40,8 @@ public class TestWormEntity extends Entity implements GeoEntity {
     private boolean strikeWorm;
     /** Prompt 16: the worm of a hunt event's strike (always deadly). */
     public void markStrikeWorm() { strikeWorm = true; }
+    /** Prompt 18: the worm of camera preview <size> <move>: harmless to everybody whatever HazardOnTestWorms says. */
+    public boolean previewWorm;
     public boolean isStrikeWorm() { return strikeWorm; }
 
     /** Prompt 17 part 0.4: the game time of the last server tick (0 = never): a worm that stops ticking while its move is not finished is reported. */

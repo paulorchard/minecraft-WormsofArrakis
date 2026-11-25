@@ -2,6 +2,8 @@ package com.paulorchard.islandcraft.wormsofarrakis.hunt;
 
 import com.paulorchard.islandcraft.wormsofarrakis.WormsOfArrakis;
 import com.paulorchard.islandcraft.wormsofarrakis.hazard.Box;
+import com.paulorchard.islandcraft.wormsofarrakis.hazard.DiscRules;
+import com.paulorchard.islandcraft.wormsofarrakis.hazard.Discs;
 import com.paulorchard.islandcraft.wormsofarrakis.hazard.HazardRules;
 import com.paulorchard.islandcraft.wormsofarrakis.hazard.WormHazard;
 import com.paulorchard.islandcraft.wormsofarrakis.test.MoveFactory;
@@ -92,7 +94,7 @@ public final class HazardRunner {
         return WormHazard.Settings.of(c.hazardSkin, c.throatReach, c.hazardParts, c.hazardSubsteps, c.hazardTimeOffsetSeconds);
     }
 
-    private boolean deadly(TestWormEntity w) { return HazardRules.deadlyWorm(w.isStrikeWorm(), cfg().hazardOnTestWorms); }
+    private boolean deadly(TestWormEntity w) { return !w.previewWorm && HazardRules.deadlyWorm(w.isStrikeWorm(), cfg().hazardOnTestWorms); }
 
     // ---- the tick of a worm ----
 
@@ -107,6 +109,7 @@ public final class HazardRunner {
             if (st.hazard == null || !sp.equals(st.spec)) {
                 spec = WormSpec.parse(sp);
                 st.hazard = new WormHazard(spec, worm.getX(), worm.getY(), worm.getZ(), worm.getYRot(), settings());
+                st.hazard.discs = cfg().discSpec();
                 st.spec = sp;
                 if (!st.builtLogged) {
                     st.builtLogged = true;
@@ -120,6 +123,7 @@ public final class HazardRunner {
             return;
         }
         WormHazard hz = st.hazard;
+        hz.discs = cfg().discSpec();   // the live config numbers (prompt 18)
         double tNow = MoveFactory.tau(spec, worm.tickCount), tPrev = MoveFactory.tau(spec, Math.max(0, worm.tickCount - 1));
         // the prefilter: the box of the whole pose over the substeps, inflated by the skin and 2 blocks
         double[] b = null;
@@ -146,22 +150,28 @@ public final class HazardRunner {
             SwallowRules.State gs = e instanceof ServerPlayer ? a.groups().stateOf(e.getUUID()) : null;
             if (gs == SwallowRules.State.SWALLOWED || gs == SwallowRules.State.KILLED) continue;   // already taken
             HazardRules.Verdict v = HazardRules.decide(subject(le), cfg().hazardKillsPlayers, cfg().hazardKillsMobs, cfg().hazardPlayersImmuneOffSand, cfg().hazardMobsImmuneOffSand);
+            Discs.Disc thD = hz.throatDisc(), moD = hz.mouthDisc();
             if (v == HazardRules.Verdict.NOT_ON_SAND) {
                 AABB sb = e.getBoundingBox();
                 Box probe = new Box(sb.minX, sb.minY, sb.minZ, sb.maxX, sb.maxY, sb.maxZ);
-                if (hz.firstContact(probe, tPrev, tNow, null) != null && st.spared.add(e.getUUID()))
+                if ((hz.discContact(probe, tPrev, tNow, thD) != null || hz.discContact(probe, tPrev, tNow, moD) != null) && st.spared.add(e.getUUID()))
                     WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hazard: {} is not on sand, spared", nameOf(le));
                 continue;
             }
             if (v != HazardRules.Verdict.KILL) continue;
             AABB bb = e.getBoundingBox();
             Box box = new Box(bb.minX, bb.minY, bb.minZ, bb.maxX, bb.maxY, bb.maxZ);
-            Set<String> parts = le instanceof ServerPlayer ? (isVictim ? partsOf(cfg().victimParts) : partsOf(cfg().othersParts)) : null;   // the victim by the throat only, other players by OthersParts, mobs by any part
-            WormHazard.Contact c = hz.firstContact(box, tPrev, tNow, parts);
+            // prompt 18: the body, the head and the mandibles are harmless; only the two discs act. The mouth disc: players only, starts their camera. The throat disc: swallows a player, kills a mob.
+            if (le instanceof ServerPlayer mp && DiscRules.acts(Discs.MOUTH, true, cfg().throatDiscEnabled, cfg().mouthDiscEnabled) && run != null) {
+                WormHazard.Contact cm = hz.discContact(box, tPrev, tNow, moD);
+                if (cm != null) strikes.mouthCrossed(run, mp, (worm.tickCount - 1 + (double) cm.substep() / N) / 20.0);
+            }
+            if (!DiscRules.acts(Discs.THROAT, le instanceof ServerPlayer, cfg().throatDiscEnabled, cfg().mouthDiscEnabled)) continue;
+            WormHazard.Contact c = hz.discContact(box, tPrev, tNow, thD);
             if (c == null) continue;
             double wormSeconds = (worm.tickCount - 1 + (double) c.substep() / N) / 20.0;
             st.killed.firstKill(e.getUUID());
-            touch(level, worm, run, le, isVictim, c.part(), wormSeconds);
+            touch(level, worm, run, le, isVictim, Discs.THROAT, wormSeconds);
         }
         ticksRun++;
         nanosTotal += System.nanoTime() - t0;
@@ -176,6 +186,12 @@ public final class HazardRunner {
     }
 
     void countKill() { kills++; }
+
+    /** The geometry of a strike worm (null before its first tick): the camera clearance and the disc times use it. */
+    WormHazard hazardOf(TestWormEntity w) {
+        State st = states.get(w.getUUID());
+        return st == null ? null : st.hazard;
+    }
 
     private StrikeRunner.Run strikeRun(TestWormEntity w) { return w.isStrikeWorm() ? strikes.runOfWorm(w) : null; }
 
@@ -283,7 +299,7 @@ public final class HazardRunner {
             s2 = cross(d, s1);
             for (int i = 0; i < 16; i++) {
                 double an = 2 * Math.PI * i / 16, ca = Math.cos(an), sa = Math.sin(an);
-                for (int sk = 0; sk < 2; sk++) {
+                for (int sk = 0; sk < 1; sk++) {
                     double r = ps.radius[k] + (sk == 1 ? skin : 0);
                     put(level, p, hz, sk == 1 ? RED : ParticleTypes.END_ROD, c[0] + r * (ca * s1[0] + sa * s2[0]), c[1] + r * (ca * s1[1] + sa * s2[1]), c[2] + r * (ca * s1[2] + sa * s2[2]));
                 }
@@ -295,8 +311,6 @@ public final class HazardRunner {
             double[] ap = ps.flaps.apex[j];
             for (double[] v : arc) putLocal(level, p, hz, ps, ParticleTypes.END_ROD, v);
             for (int side = 0; side < 2; side++) line(level, p, hz, ps, ParticleTypes.END_ROD, arc[side == 0 ? 0 : arc.length - 1], ap, 8);
-            double[] nr = ps.flaps.normal[j][ps.flaps.normal[j].length / 2];
-            putLocal(level, p, hz, ps, RED, new double[]{ap[0] + nr[0] * skin, ap[1] + nr[1] * skin, ap[2] + nr[2] * skin});
         }
         // the throat: the rim, four lines to the apex, and the contact skin over the rim disc in red
         double R = hz.R;
@@ -304,12 +318,30 @@ public final class HazardRunner {
         for (int i = 0; i < 32; i++) {
             double an = 2 * Math.PI * i / 32;
             putLocal(level, p, hz, ps, ParticleTypes.END_ROD, new double[]{R * Math.sin(an), R * Math.cos(an), 0});
-            putLocal(level, p, hz, ps, RED, new double[]{R * Math.sin(an), R * Math.cos(an), hz.settings.throatReach()});
         }
         for (int i = 0; i < 4; i++) {
             double an = Math.PI / 2 * i;
             line(level, p, hz, ps, ParticleTypes.END_ROD, new double[]{R * Math.sin(an), R * Math.cos(an), 0}, apex, 8);
         }
+        // prompt 18: the body, head and throat above are geometry only (non-lethal); the two discs are what acts
+        drawDisc(level, p, hz, ps, hz.mouthDisc(), MOUTH_COL);
+        drawDisc(level, p, hz, ps, hz.throatDisc(), THROAT_COL);
+        for (var cs : com.paulorchard.islandcraft.wormsofarrakis.camera.DeathCamManager.instance().all()) {
+            if (cs.level != level) continue;
+            for (int k = 0; k < 6; k++) level.sendParticles(p, ParticleTypes.END_ROD, true, true, cs.path.cx, cs.path.sandY + cs.path.p.lookHeight() + 0.3 * k, cs.path.cz, 1, 0, 0, 0, 0);   // the camera orbit target
+        }
+    }
+
+    private static final DustParticleOptions MOUTH_COL = new DustParticleOptions(0x30FF30, 1.4f), THROAT_COL = new DustParticleOptions(0xFF30FF, 1.4f);
+
+    /** A disc as a ring of particles on its rim (mouth disc green, throat disc magenta) plus its centre. */
+    private void drawDisc(ServerLevel level, ServerPlayer p, WormHazard hz, WormHazard.Pose ps, Discs.Disc d, DustParticleOptions col) {
+        int n = (int) Math.max(24, Math.min(96, Math.round(2 * Math.PI * d.radius() / 1.2)));
+        for (int i = 0; i < n; i++) {
+            double an = 2 * Math.PI * i / n;
+            putLocal(level, p, hz, ps, col, new double[]{d.radius() * Math.cos(an), d.radius() * Math.sin(an), d.z()});
+        }
+        putLocal(level, p, hz, ps, col, new double[]{0, 0, d.z()});
     }
 
     private static double[] cross(double[] a, double[] b) { return new double[]{a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]}; }

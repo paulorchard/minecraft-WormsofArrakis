@@ -119,6 +119,8 @@ public final class HuntConfigSpec {
     static final ModConfigSpec.IntValue TICKET_MAX;
     static final ModConfigSpec.BooleanValue GROUP_RELEASE, HAZ_PL_SAND, HAZ_MOB_SAND;
     static final ModConfigSpec.ConfigValue<String> VICTIM_PARTS, OTHERS_PARTS;
+    static final ModConfigSpec.BooleanValue THROAT_DISC_ON, MOUTH_DISC_ON;
+    static final ModConfigSpec.DoubleValue DISC_THROAT_R, DISC_MOUTH_F, DISC_MOUTH_R, DISC_THICK, SC_FLARE, SC_CLEAR, SC_FOV, SC_FILL, SC_MAXDIST, SC_SWEEP, SC_LOOK, SC_PUSH, SC_SPEED, SC_HMIN, SC_HFACTOR, SC_MAXSEC;
     static {
         B.push("attack");
         ATTACK_START = d("AttackRumbleStart", 0.7, 0, 1, "Strength of the rumble round the victim at the start of the freeze; it rises linearly to 1.0 at the end of the freeze and stays 1.0 until the death.");
@@ -164,6 +166,28 @@ public final class HuntConfigSpec {
         FOLLOW = d("AttackRumbleFollowSeconds", 0.25, 0.05, 5, "While the speed ramps down the attack rumble is centred again on the player this often; once they are held it stays on their block.");
         SWALLOW_MAX = d("SwallowMaxSeconds", 0, 0, 3600, "Safety: a swallowed player is killed this long after the strike started if the end never comes (0 = the run time of the move + 3 s).");
         TICKET_MAX = i("StrikeChunkTicketMax", 400, 0, 100000, "At most this many chunks (nearest first) are kept loaded and entity-ticking round the worm during a strike (0 = none).");
+        B.pop();
+        B.push("discs");
+        THROAT_DISC_ON = B.comment("The throat disc swallows players (and kills mobs) that cross it. It is the only thing that acts on a player besides the backup.").define("ThroatDiscEnabled", true);
+        MOUTH_DISC_ON = B.comment("Crossing the mouth disc starts the strike camera for a player.").define("MouthDiscEnabled", true);
+        DISC_THROAT_R = d("ThroatDiscRadiusFraction", 0.95, 0.05, 2, "Radius of the throat disc (the plane z = 0 of the head frame, the funnel's rim) as a fraction of the ring radius R.");
+        DISC_MOUTH_F = d("MouthDiscFraction", 0.5, 0.0, 1.5, "Position of the mouth disc along the head axis as a fraction of the head length HL (0 = the ring plane).");
+        DISC_MOUTH_R = d("MouthDiscRadiusFraction", 0.8, 0.05, 2, "Radius of the mouth disc as a fraction of R.");
+        DISC_THICK = d("DiscThickness", 0.5, 0.05, 5, "Thickness of both discs in blocks, centred on the plane.");
+        B.pop();
+        B.push("strikecam");
+        SC_FLARE = d("StrikeCamFlareFactor", 0.7, 0, 5, "Base camera distance = R + this x HL (the open mandibles) + the clearance.");
+        SC_CLEAR = d("StrikeCamClearanceFactor", 0.5, 0, 5, "The camera stays at least this x R outside the worm's outer surface.");
+        SC_FOV = d("StrikeCamFov", 75, 30, 130, "The field of view the framing is tuned for, in degrees (the server cannot set the client's).");
+        SC_FILL = d("StrikeCamFill", 0.85, 0.1, 3, "The worm's peak fills this fraction of the screen height (backs the camera off).");
+        SC_MAXDIST = d("StrikeCamMaxDistance", 120, 4, 2000, "The camera is never further than this from the held spot (and never outside the loaded area).");
+        SC_SWEEP = d("StrikeCamSweepDegrees", 120, 0, 360, "The orbit sweeps this many degrees, symmetric about side-on (0 = a locked camera).");
+        SC_LOOK = d("StrikeCamLookHeight", 1.0, 0, 5, "The camera looks at the held spot raised by this many blocks.");
+        SC_PUSH = d("StrikeCamPushPerTick", 1.5, 0.05, 50, "The clearance push changes by at most this many blocks per tick.");
+        SC_SPEED = d("StrikeCamMaxSpeed", 2.0, 0.1, 50, "The camera moves at most this many blocks per tick.");
+        SC_HMIN = d("StrikeCamMinHeight", 3, 0, 1000, "The camera is at least this high above the ground under it.");
+        SC_HFACTOR = d("StrikeCamHeightFactor", 0.5, 0, 4, "Camera height above the ground = this x the worm's peak height (at least StrikeCamMinHeight).");
+        SC_MAXSEC = d("StrikeCamMaxSeconds", 60, 1, 3600, "The camera is given back to the player after this long if they have not respawned.");
         B.pop();
     }
 
@@ -244,6 +268,24 @@ public final class HuntConfigSpec {
             c.hazardMobsImmuneOffSand = HAZ_MOB_SAND.get();
             c.victimParts = VICTIM_PARTS.get();
             c.othersParts = OTHERS_PARTS.get();
+            c.throatDiscEnabled = THROAT_DISC_ON.get();
+            c.mouthDiscEnabled = MOUTH_DISC_ON.get();
+            c.throatDiscRadiusFraction = DISC_THROAT_R.get();
+            c.mouthDiscFraction = DISC_MOUTH_F.get();
+            c.mouthDiscRadiusFraction = DISC_MOUTH_R.get();
+            c.discThickness = DISC_THICK.get();
+            c.strikeCamFlareFactor = SC_FLARE.get();
+            c.strikeCamClearanceFactor = SC_CLEAR.get();
+            c.strikeCamFov = SC_FOV.get();
+            c.strikeCamFill = SC_FILL.get();
+            c.strikeCamMaxDistance = SC_MAXDIST.get();
+            c.strikeCamSweepDegrees = SC_SWEEP.get();
+            c.strikeCamLookHeight = SC_LOOK.get();
+            c.strikeCamPushPerTick = SC_PUSH.get();
+            c.strikeCamMaxSpeed = SC_SPEED.get();
+            c.strikeCamMinHeight = SC_HMIN.get();
+            c.strikeCamHeightFactor = SC_HFACTOR.get();
+            c.strikeCamMaxSeconds = SC_MAXSEC.get();
             c.attackRumbleFollowSeconds = FOLLOW.get();
             c.swallowMaxSeconds = SWALLOW_MAX.get();
             c.strikeChunkTicketMax = TICKET_MAX.get();

@@ -301,6 +301,11 @@ final class StrikeRunner {
     }
 
     /** The worm touched a player who is not the victim with a part of OthersParts: they are swallowed too (held at once when they were not in the group). */
+    /** The worm's mouth disc was crossed by a player (prompt 18): their strike camera starts. */
+    void mouthCrossed(Run r, ServerPlayer p, double wormSeconds) {
+        a.groups().mouth(r.event, p, wormSeconds);
+    }
+
     void swallowOther(Run r, ServerPlayer p, String part, double wormSeconds) {
         a.groups().swallow(r.event, p, part, wormSeconds, r.devourSeconds, r.backupSeconds, false);
     }

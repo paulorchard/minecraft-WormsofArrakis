@@ -80,6 +80,49 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
     private final HazardRunner hazard = new HazardRunner(this, strikes);
     private final GroupRunner groups = new GroupRunner(this);
     private final AreaPreview areaPreview = new AreaPreview(this);
+    private final CameraMovePreview cameraMovePreview = new CameraMovePreview(this);
+    private final Map<String, Double> camPeaks = new HashMap<>();
+
+    /** The highest point of the worm above the sand over the move, from its own frames (cached). */
+    public double camPeak(StrikeType t, SizeTable.Size s) {
+        return camPeaks.computeIfAbsent(t.label + "/" + s.label, k -> new com.paulorchard.islandcraft.wormsofarrakis.hazard.WormHazard(Alignment.once(t, s), 0, 0, 0, 0, com.paulorchard.islandcraft.wormsofarrakis.hazard.WormHazard.Settings.DEFAULTS).peak(0.1));
+    }
+
+    public List<String> previewCameraMove(ServerPlayer p, SizeTable.Size size, StrikeType type) { return cameraMovePreview.start(p, size, type); }
+
+    /** A later feature subscribes to the disc crossings here. */
+    public void addDiscListener(DiscListener l) { groups.addListener(l); }
+
+    /** Start-up (prompt 18): the disc numbers, the expected disc times for a player at the entry crossing, the camera distances and the retired keys. */
+    private void logDiscsAndCamera() {
+        long t0 = System.nanoTime();
+        for (String k : cfg.retiredKeysInUse()) WormsOfArrakis.LOGGER.warn("[WormsOfArrakis] config: the key {} no longer does anything (prompt 18)", k);
+        StringBuilder g = new StringBuilder();
+        for (SizeTable.Size s : SizeTable.Size.values()) {
+            var h = new com.paulorchard.islandcraft.wormsofarrakis.hazard.WormHazard(Alignment.once(StrikeType.CRASH, s), 0, 0, 0, 0, com.paulorchard.islandcraft.wormsofarrakis.hazard.WormHazard.Settings.DEFAULTS);
+            h.discs = cfg.discSpec();
+            g.append(String.format(Locale.ROOT, " %s: R %s HL %s throat disc z 0 radius %s, mouth disc z %s radius %s;", s.label, fmt(h.R), fmt(h.headLength()), fmt(h.throatDisc().radius()), fmt(h.mouthDisc().z()), fmt(h.mouthDisc().radius())));
+        }
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] discs: thickness {} blocks (throat {} mouth {} enabled);{}", fmt(cfg.discThickness), cfg.throatDiscEnabled, cfg.mouthDiscEnabled, g);
+        int vd = server == null ? 10 : server.getPlayerList().getViewDistance();
+        var P = cfg.strikeCam();
+        for (StrikeType t : StrikeType.values()) {
+            StringBuilder tm = new StringBuilder(), cd = new StringBuilder();
+            for (SizeTable.Size s : SizeTable.Size.values()) {
+                var h = new com.paulorchard.islandcraft.wormsofarrakis.hazard.WormHazard(Alignment.once(t, s), 0, 0, 0, 0, com.paulorchard.islandcraft.wormsofarrakis.hazard.WormHazard.Settings.DEFAULTS);
+                h.discs = cfg.discSpec();
+                double ez = Alignment.entryZ(h.move);
+                double m = com.paulorchard.islandcraft.wormsofarrakis.hazard.DiscTimes.first(h, h.mouthDisc(), ez), th = com.paulorchard.islandcraft.wormsofarrakis.hazard.DiscTimes.first(h, h.throatDisc(), ez);
+                tm.append(String.format(Locale.ROOT, " %s: mouth %s s throat %s s gap %s s;", s.label, m < 0 ? "never" : fmt(m), th < 0 ? "never" : fmt(th), m < 0 || th < 0 ? "-" : fmt(th - m)));
+                double peak = camPeak(t, s);
+                var d = com.paulorchard.islandcraft.wormsofarrakis.camera.StrikeCam.distance(P, h.R, h.headLength(), peak, vd);
+                cd.append(String.format(Locale.ROOT, " %s: peak %s D_base %s D_fit %s D %s%s;", s.label, fmt(peak), fmt(d.base()), fmt(d.fit()), fmt(d.value()), d.cappedMax() ? " (capped by StrikeCamMaxDistance)" : d.cappedView() ? " (clamped to the loaded area)" : ""));
+            }
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] discs: expected times for a player at the entry crossing, {}:{}", t.label, tm);
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] camera: framing {} (clearance n = {} x R, FOV {} fill {}, view distance {} chunks):{}", t.label, fmt(P.clearanceFactor()), fmt(P.fov()), fmt(P.fill()), vd, cd);
+        }
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] discs: the start-up tables took {} ms", (System.nanoTime() - t0) / 1_000_000);
+    }
 
     /** The command hunt preview area: see {@link AreaPreview}. */
     public List<String> previewArea(ServerPlayer p, SizeTable.Size size, String move) { return areaPreview.start(p, size, move); }
@@ -218,6 +261,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         logConfig();
         strikes.warmUp();
         logStrikeAreas();
+        logDiscsAndCamera();
     }
 
     private boolean configLogged;
@@ -241,6 +285,7 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         tickAttackRumbles();
         groups.tick();
         areaPreview.tick();
+        cameraMovePreview.tick();
         playRoarShots();
         strikes.tick();
         hazard.purge();

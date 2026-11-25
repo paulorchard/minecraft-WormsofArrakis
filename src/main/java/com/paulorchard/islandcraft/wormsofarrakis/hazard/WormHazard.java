@@ -91,6 +91,119 @@ public final class WormHazard {
         return l;
     }
 
+    // ---- prompt 18: the two discs, the only things that act on anybody ----
+
+    /** The disc numbers in use (set by the runner from the config; the defaults otherwise). */
+    public Discs.Spec discs = Discs.Spec.DEFAULTS;
+
+    /** HEAD_LENGTH of the move's width (the head ring plus the closed flaps). */
+    public double headLength() { return com.paulorchard.islandcraft.wormsofarrakis.path.HeadSpec.headLength(move.width); }
+
+    public Discs.Disc throatDisc() { return Discs.throat(discs, R); }
+
+    public Discs.Disc mouthDisc() { return Discs.mouth(discs, R, headLength()); }
+
+    /** The head-frame position of a world point at the script time (the renderer's pose). */
+    public double[] headLocal(double x, double y, double z, double t) { return toLocal(poseAt(t), toModel(x, y, z)); }
+
+    /**
+     * Does the box cross the disc between {@code tPrev} and {@code tNow}? At {@code settings.substeps} instants the box (only its part above the sand level of the move) meets the thin cylinder by the
+     * 8 corners, 6 face centres, centre and vertical line of prompt 16, OR its centre passes from one side of the disc's plane to the other between two instants inside the disc's radius (a fast worm
+     * cannot skip the thin disc). The first instant wins; the part name of the contact is the disc's name.
+     */
+    public Contact discContact(Box box, double tPrev, double tNow, Discs.Disc d) {
+        Box b = box.above(oy - 1e-6);
+        if (b == null) return null;
+        int N = settings.substeps();
+        double[] prev = headLocal(b.cx(), b.cy(), b.cz(), tPrev + settings.timeOffset());
+        for (int i = 1; i <= N; i++) {
+            double t = tPrev + (tNow - tPrev) * i / N + settings.timeOffset();
+            Pose p = poseAt(t);
+            for (double[] s : b.samples()) if (d.contains(toLocal(p, toModel(s[0], s[1], s[2])))) return new Contact(d.name(), t, i);
+            double[] cur = toLocal(p, toModel(b.cx(), b.cy(), b.cz()));
+            double a = prev[2] - d.z(), c = cur[2] - d.z();
+            if (a * c < 0 || (a != 0 && c == 0)) {
+                double f = a / (a - c);
+                double x = prev[0] + (cur[0] - prev[0]) * f, y = prev[1] + (cur[1] - prev[1]) * f;
+                if (Math.hypot(x, y) <= d.radius()) return new Contact(d.name(), t, i);
+            }
+            prev = cur;
+        }
+        return null;
+    }
+
+    /**
+     * The nearest point of the worm's outer surface to a world point at the script time: the body capsules (tapered, as drawn), the edges of the mandible shell at its live opening and the rim of the
+     * throat funnel. Returns {distance (negative inside the body), x, y, z} of the nearest surface point in world coordinates. Geometry only: nothing acts on it.
+     */
+    public double[] nearestSurface(double wx, double wy, double wz, double t) {
+        Pose p = poseAt(t);
+        double[] q = toModel(wx, wy, wz);
+        double best = Double.MAX_VALUE;
+        double[] bp = null;
+        for (int k = 0; k < p.drawn.length; k++) {
+            if (!p.drawn[k]) continue;
+            double[] a = p.centre[k], b = p.centre[k + 1];
+            double abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
+            double l2 = abx * abx + aby * aby + abz * abz;
+            double f = l2 < 1e-12 ? 0 : Math.max(0, Math.min(1, ((q[0] - a[0]) * abx + (q[1] - a[1]) * aby + (q[2] - a[2]) * abz) / l2));
+            double cx = a[0] + abx * f, cy = a[1] + aby * f, cz = a[2] + abz * f;
+            double r = p.radius[k] + (p.radius[k + 1] - p.radius[k]) * f;
+            double dx = q[0] - cx, dy = q[1] - cy, dz = q[2] - cz;
+            double dl = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            double d = dl - r;
+            if (d < best) {
+                best = d;
+                double s = dl < 1e-9 ? 0 : r / dl;
+                bp = new double[]{cx + dx * s, cy + dy * s, cz + dz * s};
+            }
+        }
+        // the mandible shell: the hinge arcs and the ridges to the apex of every flap, as polylines
+        for (int j = 0; j < p.flaps.arc.length; j++) {
+            double[][] arc = p.flaps.arc[j];
+            double[] ap = p.flaps.apex[j];
+            for (int i = 0; i + 1 < arc.length; i++) { double[][] r = segDist(q, fromLocal(p, arc[i]), fromLocal(p, arc[i + 1])); if (r[0][0] < best) { best = r[0][0]; bp = r[1]; } }
+            for (int side = 0; side < 2; side++) {
+                double[][] r = segDist(q, fromLocal(p, arc[side == 0 ? 0 : arc.length - 1]), fromLocal(p, ap));
+                if (r[0][0] < best) { best = r[0][0]; bp = r[1]; }
+            }
+        }
+        // the rim of the throat funnel
+        for (int i = 0; i < 24; i++) {
+            double an = 2 * Math.PI * i / 24, an2 = 2 * Math.PI * (i + 1) / 24;
+            double[][] r = segDist(q, fromLocal(p, new double[]{R * Math.sin(an), R * Math.cos(an), 0}), fromLocal(p, new double[]{R * Math.sin(an2), R * Math.cos(an2), 0}));
+            if (r[0][0] < best) { best = r[0][0]; bp = r[1]; }
+        }
+        if (bp == null) return null;
+        double[] w = toWorld(bp[0], bp[1], bp[2]);
+        return new double[]{best, w[0], w[1], w[2]};
+    }
+
+    /** Distance from q to the segment a-b and the nearest point on it. */
+    private static double[][] segDist(double[] q, double[] a, double[] b) {
+        double abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
+        double l2 = abx * abx + aby * aby + abz * abz;
+        double f = l2 < 1e-12 ? 0 : Math.max(0, Math.min(1, ((q[0] - a[0]) * abx + (q[1] - a[1]) * aby + (q[2] - a[2]) * abz) / l2));
+        double[] c = {a[0] + abx * f, a[1] + aby * f, a[2] + abz * f};
+        double dx = q[0] - c[0], dy = q[1] - c[1], dz = q[2] - c[2];
+        return new double[][]{{Math.sqrt(dx * dx + dy * dy + dz * dz)}, c};
+    }
+
+    /** The highest point of the worm above the sand level over the whole move (joint centre + radius, the flap vertices), sampled every {@code step} seconds of script time. */
+    public double peak(double step) {
+        double peak = 0;
+        double T = move.playTime();
+        for (double t = 0; t <= T + 1e-9; t += step) {
+            Pose p = poseAt(t);
+            for (int k = 0; k < p.drawn.length; k++) if (p.drawn[k]) peak = Math.max(peak, p.centre[k][1] + p.radius[k]);
+            for (int j = 0; j < p.flaps.arc.length; j++) {
+                for (double[] v : p.flaps.arc[j]) peak = Math.max(peak, fromLocal(p, v)[1]);
+                peak = Math.max(peak, fromLocal(p, p.flaps.apex[j])[1]);
+            }
+        }
+        return peak;
+    }
+
     public WormHitShape body() { return body; }
     public WormHitShape head() { return head; }
     public WormHitShape throat() { return throat; }

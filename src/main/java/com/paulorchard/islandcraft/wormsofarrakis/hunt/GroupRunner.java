@@ -32,6 +32,8 @@ final class GroupRunner {
         boolean inCircle = true, onSand = true;
         String part = "";
         double touchSeconds = -1;
+        final DiscRecord rec = new DiscRecord();
+        boolean camera, discLogged;
         double heldX, heldZ;
 
         Member(UUID id, String name, boolean late, ServerLevel level) {
@@ -159,17 +161,8 @@ final class GroupRunner {
             memberOf.remove(id, e.id);
             WormsOfArrakis.LOGGER.info("[WormsOfArrakis] group: {} is outside the circle ({} blocks) of the chosen {}: released, they got away", m.name, HuntAdapter.fmt(g.circleRadius), g.type);
         }
-        int sizeIdx = e.size.ordinal();
-        for (Member m : g.members.values()) {
-            if (m.state != SwallowRules.State.HELD) continue;
-            ServerPlayer p = a.player(m.id);
-            if (p == null) continue;
-            held.add(m.name);
-            long seed = e.id * 0x9E3779B97F4A7C15L ^ m.id.getLeastSignificantBits();
-            DeathCamManager.instance().startStrikeCamera(p, yawDeg, sizeIdx, seed, playSeconds, e.id);
-        }
-        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] group: event {} chose {} circle radius {} at ({}, {}): held={} released={}; the strike camera starts for the held (turn {} degrees over {} s)", e.id, g.type, HuntAdapter.fmt(g.circleRadius), HuntAdapter.fmt(entryX), HuntAdapter.fmt(entryZ), held, released,
-                HuntAdapter.fmt(a.config().deathCamTurnDegrees), HuntAdapter.fmt(playSeconds));
+        for (Member m : g.members.values()) if (m.state == SwallowRules.State.HELD && a.player(m.id) != null) held.add(m.name);
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] group: event {} chose {} circle radius {} at ({}, {}): held={} released={}; no camera yet: each player's camera starts when they cross the mouth disc or the throat disc", e.id, g.type, HuntAdapter.fmt(g.circleRadius), HuntAdapter.fmt(entryX), HuntAdapter.fmt(entryZ), held, released);
     }
 
     // ---- the touch ----
@@ -204,12 +197,67 @@ final class GroupRunner {
         }
         WormsOfArrakis.LOGGER.info("[WormsOfArrakis] swallowed: {} by {} at t={} after the move started (devour table said {}){}; the kill comes at the end of the strike{}", m.name, part == null ? "the backup (the throat never reached them within " + HuntAdapter.fmt(backupSeconds) + " s after the table time)" : part,
                 HuntAdapter.fmt(wormSeconds), HuntAdapter.fmt(devourTable), isVictim ? " [victim]" : m.late ? " [bystander, held at once]" : " [group member]", e.noKill() ? " (nokill: they are released alive instead)" : "");
-        // the camera of a late member starts now; a held member's camera has run since the strike began
-        if (m.late && g.chosen) {
-            long seed = e.id * 0x9E3779B97F4A7C15L ^ m.id.getLeastSignificantBits();
-            DeathCamManager.instance().startStrikeCamera(p, g.worm == null ? 0 : g.worm.getYRot(), e.size.ordinal(), seed, Math.max(1.0, g.playSeconds - g.strikeTicks / 20.0), e.id);
-        }
+        if (part == null) m.rec.backup(wormSeconds); else m.rec.throat(e.id, p.getUUID(), wormSeconds, listeners);
+        startCamera(e, g, m, p, part == null ? "the victim's backup swallow" : "the throat disc was crossed", wormSeconds);   // the camera starts at the first of mouth disc, throat disc, backup
         return true;
+    }
+
+    // ---- the discs (prompt 18) ----
+
+    private final List<DiscListener> listeners = new ArrayList<>();
+
+    /** A later feature (a multiplayer detector) subscribes here; nothing else in the code needs to change. */
+    void addListener(DiscListener l) { listeners.add(l); }
+
+    /**
+     * A player crossed the mouth disc at {@code wormSeconds} after the move started: the strike camera starts for them if it has not, and the time is kept. A player who is not in the group (a bystander, or a
+     * member released at the choice) is held at once as a late member, as for the throat.
+     */
+    boolean mouth(HuntEvent e, ServerPlayer p, double wormSeconds) {
+        Group g = groups.get(e.id);
+        if (g == null) return false;
+        Member m = g.members.get(p.getUUID());
+        if (m != null && (m.state == SwallowRules.State.KILLED)) return false;
+        if (m == null || m.state == SwallowRules.State.RELEASED) {
+            Long held = memberOf.get(p.getUUID());
+            if (held != null && held != e.id) return false;
+            m = new Member(p.getUUID(), p.getGameProfile().name(), true, p.level());
+            m.heldX = p.getX();
+            m.heldZ = p.getZ();
+            g.members.put(m.id, m);
+            memberOf.put(m.id, e.id);
+            a.holdMember(e, p, 0);
+        }
+        if (m.rec.mouth(e.id, p.getUUID(), wormSeconds, listeners)) {
+            WormsOfArrakis.LOGGER.info("[WormsOfArrakis] discs: {} crossed the mouth disc at t={} after the move started{}", m.name, HuntAdapter.fmt(wormSeconds), m.late ? " [bystander, held at once]" : "");
+        }
+        startCamera(e, g, m, p, "the mouth disc was crossed", wormSeconds);
+        return true;
+    }
+
+    /** Starts the strike camera of a player once, framed outside the worm (prompt 18 part 3). */
+    private void startCamera(HuntEvent e, Group g, Member m, ServerPlayer p, String why, double wormSeconds) {
+        if (m.camera) return;
+        HazardRunner hr = HazardRunner.instance();
+        com.paulorchard.islandcraft.wormsofarrakis.hazard.WormHazard hz = hr == null || g.worm == null ? null : hr.hazardOf(g.worm);
+        StrikeType t = StrikeType.of(g.type);
+        if (hz == null || t == null) {
+            WormsOfArrakis.LOGGER.warn("[WormsOfArrakis] camera: no worm geometry for {} ({}): no camera", m.name, why);
+            return;
+        }
+        long seed = e.id * 0x9E3779B97F4A7C15L ^ m.id.getLeastSignificantBits();
+        double remaining = Math.max(1.0, g.playSeconds - g.strikeTicks / 20.0);
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] camera: {} starts at t={} after the move started because {}", m.name, HuntAdapter.fmt(wormSeconds), why);
+        var s = DeathCamManager.instance().startStrikeCamera(p, g.worm.getYRot(), hz.R, hz.headLength(), a.camPeak(t, e.size), seed, remaining, new WormSurface(g.worm, hz), e.id);
+        m.camera = s != null;
+    }
+
+    /** One line per player at the end: the two times and the gap (the marker for future events). */
+    private void logDiscs(Group g, Member m) {
+        if (m.discLogged) return;
+        m.discLogged = true;
+        String body = m.rec.describe();
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] discs: {} {} ({} W{})", m.name, body, g.type, HuntAdapter.trim(g.event.width));
     }
 
     // ---- every tick ----
@@ -263,6 +311,7 @@ final class GroupRunner {
 
     /** One member leaves by {@code why}; the action is the rule of {@link SwallowRules#actionFor}. */
     private void finishMember(Group g, Member m, SwallowRules.End why) {
+        logDiscs(g, m);
         SwallowRules.Action act = SwallowRules.actionFor(m.state, why, g.event.noKill());
         ServerPlayer p = a.player(m.id);
         switch (act) {
@@ -276,7 +325,7 @@ final class GroupRunner {
                 if (hz != null) hz.countKill();
                 WormsOfArrakis.LOGGER.info("[WormsOfArrakis] group: {} is killed ({}): swallowed by {} at t={} s; dead={}", m.name, why, m.part, HuntAdapter.fmt(m.touchSeconds), dead);
                 if (!dead && p != null) WormsOfArrakis.LOGGER.warn("[WormsOfArrakis] strike: {} could not be killed (damage and death were both refused); they are released", m.name);
-                if (!dead) m.state = SwallowRules.State.RELEASED;
+                if (!dead) { m.state = SwallowRules.State.RELEASED; DeathCamManager.instance().releaseView(m.id, "the kill was refused, released alive"); }
             }
             case RELEASE -> {
                 boolean wasSwallowed = m.state == SwallowRules.State.SWALLOWED;
@@ -344,6 +393,7 @@ final class GroupRunner {
             boolean sand = p != null && a.onSandNow(p);
             l.add(String.format(Locale.ROOT, "  group: %s%s on sand %s, %s, %s", m.name, m.id.equals(g.victim) ? " (victim)" : "", sand ? "yes" : "no",
                     g.chosen ? "in the chosen circle " + (m.inCircle ? "yes" : "no") : "circle not chosen yet", m.state.name().toLowerCase(Locale.ROOT)));
+            if (m.rec.mouthAt >= 0 || m.rec.throatAt >= 0 || m.rec.backupAt >= 0) l.add(String.format(Locale.ROOT, "    discs: mouth %s throat %s%s%s", m.rec.mouthAt >= 0 ? "at " + HuntAdapter.fmt(m.rec.mouthAt) + " s" : "-", m.rec.throatAt >= 0 ? "at " + HuntAdapter.fmt(m.rec.throatAt) + " s" : "-", m.rec.mouthAt >= 0 && m.rec.throatAt >= 0 ? " gap " + HuntAdapter.fmt(m.rec.throatAt - m.rec.mouthAt) + " s" : "", m.rec.backupAt >= 0 ? " backup at " + HuntAdapter.fmt(m.rec.backupAt) + " s" : ""));
         }
         return l;
     }

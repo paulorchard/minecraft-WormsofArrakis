@@ -56,6 +56,35 @@ public final class HuntConfig {
     public double strikeAreaMargin = 0, attackRumbleFollowSeconds = 0.25, swallowMaxSeconds = 0;
     public boolean groupReleaseOutside = true, hazardPlayersImmuneOffSand = true, hazardMobsImmuneOffSand = true;
     public String victimParts = "throat", othersParts = "body,head,throat";
+    // prompt 18: the discs and the strike camera (HazardParts, VictimParts, OthersParts and the DeathCam* keys are retired / superseded and only read to warn)
+    public boolean throatDiscEnabled = true, mouthDiscEnabled = true;
+    public double throatDiscRadiusFraction = 0.95, mouthDiscFraction = 0.5, mouthDiscRadiusFraction = 0.8, discThickness = 0.5;
+    public double strikeCamFlareFactor = 0.7, strikeCamClearanceFactor = 0.5, strikeCamFov = 75, strikeCamFill = 0.85, strikeCamMaxDistance = 120, strikeCamSweepDegrees = 120, strikeCamLookHeight = 1.0,
+            strikeCamPushPerTick = 1.5, strikeCamMaxSpeed = 2.0, strikeCamMinHeight = 3, strikeCamHeightFactor = 0.5, strikeCamMaxSeconds = 60;
+
+    public com.paulorchard.islandcraft.wormsofarrakis.hazard.Discs.Spec discSpec() {
+        return new com.paulorchard.islandcraft.wormsofarrakis.hazard.Discs.Spec(throatDiscEnabled, mouthDiscEnabled, throatDiscRadiusFraction, mouthDiscFraction, mouthDiscRadiusFraction, discThickness);
+    }
+
+    public com.paulorchard.islandcraft.wormsofarrakis.camera.StrikeCam.Params strikeCam() {
+        return new com.paulorchard.islandcraft.wormsofarrakis.camera.StrikeCam.Params(strikeCamFlareFactor, strikeCamClearanceFactor, strikeCamFov, strikeCamFill, strikeCamMaxDistance, strikeCamSweepDegrees, strikeCamLookHeight, strikeCamPushPerTick, strikeCamMaxSpeed, strikeCamMinHeight, strikeCamHeightFactor, strikeCamMaxSeconds);
+    }
+
+    /** The retired and superseded keys whose value differs from the default: they no longer do anything (prompt 18); one warning line each, logged once at start-up. */
+    public java.util.List<String> retiredKeysInUse() {
+        java.util.List<String> l = new java.util.ArrayList<>();
+        if (!"body,head,throat".equals(hazardParts)) l.add("HazardParts (retired: the body, head and mandibles are harmless; use ThroatDiscEnabled and MouthDiscEnabled)");
+        if (!"throat".equals(victimParts)) l.add("VictimParts (retired: the throat disc swallows)");
+        if (!"body,head,throat".equals(othersParts)) l.add("OthersParts (retired: the throat disc swallows)");
+        if (!java.util.Arrays.equals(deathCamDistance, new double[]{24, 40, 70, 100})) l.add("DeathCamDistance.<size> (superseded by StrikeCamFlareFactor, StrikeCamClearanceFactor, StrikeCamFill, StrikeCamMaxDistance)");
+        if (deathCamTurnDegrees != 120) l.add("DeathCamTurnDegrees (superseded by StrikeCamSweepDegrees)");
+        if (deathCamMaxSeconds != 60) l.add("DeathCamMaxSeconds (superseded by StrikeCamMaxSeconds)");
+        if (lookHeight != 0.25) l.add("LookHeight (superseded by StrikeCamLookHeight)");
+        if (deathCamHeightFactor != 0.45) l.add("DeathCamHeightFactor (superseded by StrikeCamHeightFactor)");
+        if (deathCamMinHeight != 8) l.add("DeathCamMinHeight (superseded by StrikeCamMinHeight)");
+        if (deathCamSandClearance != 3) l.add("DeathCamSandClearance (superseded by the clearance rule)");
+        return l;
+    }
     public int strikeChunkTicketMax = 400;
 
     // strike (prompt 14)
@@ -97,6 +126,9 @@ public final class HuntConfig {
                 + " HazardKillsPlayers=" + hazardKillsPlayers + " HazardKillsMobs=" + hazardKillsMobs + " HazardOnTestWorms=" + hazardOnTestWorms + " ThroatBackupSeconds=" + throatBackupSeconds);
         l.add("DeathCamDistance=" + java.util.Arrays.toString(deathCamDistance) + " (small, medium, large, huge) DeathCamTurnDegrees=" + deathCamTurnDegrees + " DeathCamMaxSeconds=" + deathCamMaxSeconds + " LookHeight=" + lookHeight
                 + " DeathCamHeightFactor=" + deathCamHeightFactor + " DeathCamMinHeight=" + deathCamMinHeight + " DeathCamSandClearance=" + deathCamSandClearance);
+        l.add("ThroatDiscEnabled=" + throatDiscEnabled + " MouthDiscEnabled=" + mouthDiscEnabled + " ThroatDiscRadiusFraction=" + throatDiscRadiusFraction + " MouthDiscFraction=" + mouthDiscFraction + " MouthDiscRadiusFraction=" + mouthDiscRadiusFraction + " DiscThickness=" + discThickness);
+        l.add("StrikeCamFlareFactor=" + strikeCamFlareFactor + " StrikeCamClearanceFactor=" + strikeCamClearanceFactor + " StrikeCamFov=" + strikeCamFov + " StrikeCamFill=" + strikeCamFill + " StrikeCamMaxDistance=" + strikeCamMaxDistance + " StrikeCamSweepDegrees=" + strikeCamSweepDegrees + " StrikeCamLookHeight=" + strikeCamLookHeight
+                + " StrikeCamPushPerTick=" + strikeCamPushPerTick + " StrikeCamMaxSpeed=" + strikeCamMaxSpeed + " StrikeCamMinHeight=" + strikeCamMinHeight + " StrikeCamHeightFactor=" + strikeCamHeightFactor + " StrikeCamMaxSeconds=" + strikeCamMaxSeconds);
         l.add("StrikeAreaMargin=" + strikeAreaMargin + " GroupReleaseOutside=" + groupReleaseOutside + " HazardPlayersImmuneOffSand=" + hazardPlayersImmuneOffSand + " HazardMobsImmuneOffSand=" + hazardMobsImmuneOffSand + " VictimParts=" + victimParts + " OthersParts=" + othersParts
                 + " AttackRumbleFollowSeconds=" + attackRumbleFollowSeconds + " SwallowMaxSeconds=" + swallowMaxSeconds + " StrikeChunkTicketMax=" + strikeChunkTicketMax);
         for (int t = 0; t < 4; t++) for (int s = 0; s < 4; s++) if (strikeAreaRadius[t][s] > 0) l.add("StrikeAreaRadius." + mv[t] + "." + sz[s] + "=" + strikeAreaRadius[t][s] + " (override)");
