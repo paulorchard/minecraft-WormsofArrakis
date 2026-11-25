@@ -174,7 +174,7 @@ class Prompt10CrestTest {
             }
         }
         // crash, emerge, engulf keep the sheet of prompt 09
-        assertEquals(82, FxPlayer.expand(Prompt10Test.anchors(Prompt10Test.crash(16)), FxOptions.full(true), 1).size());
+        assertEquals(79, FxPlayer.expand(Prompt10Test.anchors(Prompt10Test.crash(16)), FxOptions.full(true), 1).size());
     }
 
     // ---- the lanes: exit eruption, any rows ----

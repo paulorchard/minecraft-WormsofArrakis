@@ -150,10 +150,10 @@ class Prompt09Test {
     }
 
     @Test
-    void theScheduleOfCrashW16Has82PlaysAndMonotoneRows() {
-        assertEquals(82, CrashFx.totalPlays());
+    void theScheduleOfCrashW16Has79PlaysAndMonotoneRows() {
+        assertEquals(79, CrashFx.totalPlays());
         List<FxPlayer.Play> plays = FxPlayer.expand(anchors(crash(16)), FxOptions.defaults(true), 1);
-        assertEquals(82, plays.size());
+        assertEquals(79, plays.size());
         for (int c = 0; c < CrashFx.CUES.size(); c++) {
             double last = -1e9;
             for (FxPlayer.Play p : plays) {
@@ -461,7 +461,7 @@ class Prompt09Test {
         Run r = new Run();
         FxPlayer p = new FxPlayer(m, FxOptions.defaults(true), MouthAnim.DEFAULT_CLOSE_TIME, MouthAnim.CLOSE_END_DEFAULT_MARK, 1);
         for (double tau = DT; tau <= 2 * m.cycle; tau += DT) { r.at = tau; p.step(tau, 0, r.sink()); }
-        assertEquals(2 * 82, r.sounds.size(), "the whole sheet in each loop");
+        assertEquals(2 * 79, r.sounds.size(), "the whole sheet in each loop");
     }
 
     @Test

@@ -35,7 +35,7 @@ public final class CrashFx {
     public static final String GRAVEL_STEP = "block.gravel.step", WARDEN_HEARTBEAT = "entity.warden.heartbeat", GENERIC_EXPLODE = "entity.generic.explode",
             MACE_SMASH_GROUND_HEAVY = "item.mace.smash_ground_heavy", SAND_BREAK = "block.sand.break", WARDEN_EMERGE = "entity.warden.emerge",
             SAND_HIT = "block.sand.hit", BONE_BLOCK_HIT = "block.bone_block.hit", RAVAGER_ROAR = "entity.ravager.roar", ENDER_DRAGON_GROWL = "entity.ender_dragon.growl",
-            BONE_BLOCK_BREAK = "block.bone_block.break", IRON_GOLEM_DAMAGE = "entity.iron_golem.damage", SAND_STEP = "block.sand.step", GRAVEL_BREAK = "block.gravel.break";
+            BONE_BLOCK_BREAK = "block.bone_block.break", WARDEN_STEP = "entity.warden.step", WARDEN_DIG = "entity.warden.dig", IRON_GOLEM_DAMAGE = "entity.iron_golem.damage", SAND_STEP = "block.sand.step", GRAVEL_BREAK = "block.gravel.break";
 
     /**
      * One sound row: from {@code anchor + off} the event plays {@code rep} times, {@code every} seconds apart, at volume {@code vol} and pitch
@@ -44,8 +44,8 @@ public final class CrashFx {
     public record Cue(Group group, String name, String event, Anchor anchor, double off, double vol, double pitch, int rep, double every, double jit) {}
 
     public static final List<Cue> CUES = List.of(
-            new Cue(Group.TREMOR, "Tremor: gravel grumble", GRAVEL_STEP, Anchor.APPROACH, -0.15, 4.6, 0.25, 7, 0.33, 0.12),
-            new Cue(Group.TREMOR, "Tremor: deep heartbeat", WARDEN_HEARTBEAT, Anchor.APPROACH, 0.3, 2.4, 0.55, 4, 0.7, 0.05),
+            new Cue(Group.TREMOR, "Tremor: warden step", WARDEN_STEP, Anchor.APPROACH, -0.15, 4.6, 0.25, 7, 0.33, 0.12),
+            new Cue(Group.TREMOR, "Tremor: deep heartbeat", WARDEN_HEARTBEAT, Anchor.APPROACH, 0.3, 2.4, 0.55, 1, 0, 0.05),
             new Cue(Group.BREACH, "Breach: boom", GENERIC_EXPLODE, Anchor.BREACH, 0, 4, 0.55, 1, 0, 0.05),
             new Cue(Group.BREACH, "Breach: ground smash", MACE_SMASH_GROUND_HEAVY, Anchor.BREACH, 0, 3.5, 0.6, 1, 0, 0.05),
             new Cue(Group.BREACH, "Breach: sand spray", SAND_BREAK, Anchor.BREACH, 0.05, 4.5, 0.55, 7, 0.08, 0.15),
@@ -58,7 +58,7 @@ public final class CrashFx {
             new Cue(Group.MOUTH, "Mouth clamp: thud", IRON_GOLEM_DAMAGE, Anchor.RISE_END, -0.1, 2, 0.5, 1, 0, 0.05),
             new Cue(Group.SLIDE, "Hold: sand sliding", SAND_STEP, Anchor.RISE_END, 0.1, 0.9, 0.6, 6, 0.25, 0.2),
             new Cue(Group.FALL, "Fall: rushing sand", SAND_BREAK, Anchor.FALL_START, 0.1, 1.2, 0.55, 9, 0.25, 0.2),
-            new Cue(Group.FALL, "Re-entry: impact", GENERIC_EXPLODE, Anchor.REENTRY, 0, 2, 0.7, 1, 0, 0.05),
+            new Cue(Group.FALL, "Fall: rumble down", WARDEN_DIG, Anchor.FALL_START, 0.3, 3, 0.6, 1, 0, 0.04),
             new Cue(Group.FALL, "Re-entry: sand collapse", SAND_BREAK, Anchor.REENTRY, 0.05, 3.2, 0.5, 8, 0.1, 0.15),
             new Cue(Group.FALL, "Re-entry: gravel", GRAVEL_BREAK, Anchor.REENTRY, 0.15, 2.3, 0.55, 4, 0.15, 0.15));
 

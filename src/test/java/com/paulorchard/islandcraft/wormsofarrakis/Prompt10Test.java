@@ -460,7 +460,7 @@ class Prompt10Test {
         assertEquals("approach=2.17 breach=4.10 closeStart=6.56 riseEnd=7.46 fallStart=8.96 reentry=11.54 end=11.84 (holeZ=28.80 reentryZ=29.85)", anchors(crash(16)).line());
         assertEquals("approach=2.33 breach=4.26 closeStart=4.94 riseEnd=5.84 fallStart=7.84 reentry=9.42 end=13.68 (holeZ=26.00 reentryZ=26.00)", anchors(spec("emerge", 16, 60, "")).line());
         assertEquals("approach=2.17 breach=4.10 closeStart=4.11 riseEnd=5.01 fallStart=5.51 reentry=6.86 end=7.38 (holeZ=28.80 reentryZ=28.80)", anchors(spec("engulf", 16, 60, "")).line());
-        assertEquals(82, FxPlayer.expand(anchors(crash(16)), FxOptions.full(true), 1).size());
+        assertEquals(79, FxPlayer.expand(anchors(crash(16)), FxOptions.full(true), 1).size());
     }
 
     private static int row(String start) {
