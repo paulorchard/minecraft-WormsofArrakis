@@ -205,7 +205,50 @@ public final class HuntConfigSpec {
         B.pop();
     }
 
+    /** The two modes of the size rule (prompt 20); the constants are lower case so that the toml and the config screen read depth and players. */
+    public enum SizeModeValue { depth, players }
+
+    static final ModConfigSpec.EnumValue<SizeModeValue> SIZE_MODE;
+    static final ModConfigSpec.DoubleValue OPEN_PERCENT;
+    static final ModConfigSpec.IntValue OPEN_RADIUS, OPEN_SPACING, PLAYERS_LARGE, PLAYERS_HUGE;
+    static final ModConfigSpec.DoubleValue[][] WEIGHT_PLAYERS = new ModConfigSpec.DoubleValue[4][4];
+    @SuppressWarnings("unchecked")
+    static final ModConfigSpec.ConfigValue<String>[] PM_OPEN = new ModConfigSpec.ConfigValue[3], PM_CLOSED = new ModConfigSpec.ConfigValue[3];
+    static {
+        HuntConfig def = new HuntConfig();
+        String[] mv = {"crest", "crash", "emerge", "engulf"}, sz = {"small", "medium", "large", "huge"}, tier = {"single", "group", "crowd"};
+        B.push("size");
+        SIZE_MODE = B.comment("How the size of a worm is chosen when an event starts. depth: by the depth of the sand under the trigger player (DepthSmallMax and the others). players: by the number of players in the event list and whether the surroundings are open desert (the PlayersMode keys). A running event keeps the mode it started with. A server rule: only the server's value counts.").translation("islandcraft_wormsofarrakis.configuration.SizeMode").defineEnum("SizeMode", SizeModeValue.depth);
+        OPEN_PERCENT = B.comment("Players mode: the desert is open when at least this percent of the sampled surface round the trigger is sand.").translation("islandcraft_wormsofarrakis.configuration.OpenDesertPercent").defineInRange("OpenDesertPercent", 98.0, 0.0, 100.0);
+        OPEN_RADIUS = B.comment("Players mode: radius (blocks) of the disc that is sampled for open desert (48 = three chunks).").translation("islandcraft_wormsofarrakis.configuration.OpenDesertRadius").defineInRange("OpenDesertRadius", 48, 4, 256);
+        OPEN_SPACING = B.comment("Players mode: the sample grid spacing (blocks); 4 gives about 450 columns.").translation("islandcraft_wormsofarrakis.configuration.OpenDesertSampleSpacing").defineInRange("OpenDesertSampleSpacing", 4, 1, 32);
+        PLAYERS_LARGE = B.comment("Players mode: from this many players in the list the worm is of the group size.").translation("islandcraft_wormsofarrakis.configuration.PlayersLargeAt").defineInRange("PlayersLargeAt", 2, 1, 1000);
+        PLAYERS_HUGE = B.comment("Players mode: from this many players in the list the worm is of the crowd size.").translation("islandcraft_wormsofarrakis.configuration.PlayersHugeAt").defineInRange("PlayersHugeAt", 6, 1, 1000);
+        B.comment("Players mode: the size of the worm (small, medium, large, huge) by the number of players: single (fewer than PlayersLargeAt), group (PlayersLargeAt up to PlayersHugeAt - 1), crowd (PlayersHugeAt or more); Open when the desert is open, Closed when it is not.").push("PlayersMode");
+        B.push("Open");
+        for (int t = 0; t < 3; t++) PM_OPEN[t] = B.comment("Size with the desert open, " + tier[t] + ".").define(tier[t], def.playersSizeOpen[t], o -> o instanceof String);
+        B.pop();
+        B.push("Closed");
+        for (int t = 0; t < 3; t++) PM_CLOSED[t] = B.comment("Size with the desert not open, " + tier[t] + ".").define(tier[t], def.playersSizeClosed[t], o -> o instanceof String);
+        B.pop();
+        B.comment("The odds of the four strike types per size in players mode (the depth mode keeps strike.StrikeWeights.<size>); the rules of strike.StrikeWeights apply: 0 = never, a negative number or a sum of 0 is refused and the default is used.").push("StrikeWeights");
+        for (int s = 0; s < 4; s++) {
+            B.push(sz[s]);
+            for (int t = 0; t < 4; t++) WEIGHT_PLAYERS[s][t] = d(mv[t], HuntConfig.DEFAULT_PLAYERS_WEIGHTS[s][t], -100000, 100000, "Weight of the " + mv[t] + " for the " + sz[s] + " worm, players mode.");
+            B.pop();
+        }
+        B.pop();
+        B.pop();
+        B.pop();
+    }
+
     public static final ModConfigSpec SPEC = B.build();
+
+    /** Sets SizeMode in the config (the command and the config screen), saves the file; the next refresh copies it into the HuntConfig. */
+    public static void setSizeMode(String mode) {
+        SIZE_MODE.set(SizeModeValue.valueOf(SizeTable.mode(mode)));
+        SPEC.save();
+    }
 
     /** Copies the config values into {@code c}; the defaults stay when the config is not loaded yet. Returns true when it was loaded. */
     public static boolean refresh(HuntConfig c) {
@@ -224,6 +267,14 @@ public final class HuntConfigSpec {
             c.shallowPenalty = SHALLOW_PENALTY.get();
             c.shallowLogSeconds = SHALLOW_LOG.get();
             c.depthShallowMax = DEPTH_SHALLOW.get();
+            c.sizeMode = SIZE_MODE.get().name();
+            c.openDesertPercent = OPEN_PERCENT.get();
+            c.openDesertRadius = OPEN_RADIUS.get();
+            c.openDesertSpacing = OPEN_SPACING.get();
+            c.playersLargeAt = PLAYERS_LARGE.get();
+            c.playersHugeAt = PLAYERS_HUGE.get();
+            for (int t = 0; t < 3; t++) { c.playersSizeOpen[t] = PM_OPEN[t].get(); c.playersSizeClosed[t] = PM_CLOSED[t].get(); }
+            for (int s = 0; s < 4; s++) for (int t = 0; t < 4; t++) c.playersWeights[s][t] = WEIGHT_PLAYERS[s][t].get();
             c.depthSmallMax = DEPTH_SMALL.get();
             c.depthMediumMax = DEPTH_MEDIUM.get();
             c.depthLargeMax = DEPTH_LARGE.get();

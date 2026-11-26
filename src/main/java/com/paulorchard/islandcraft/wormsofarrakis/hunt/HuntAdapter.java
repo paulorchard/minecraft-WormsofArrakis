@@ -168,6 +168,44 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
     public void setFreezeHook(FreezeHook h) { this.freezeHook = h == null ? FreezeHook.LOGGING : h; }
 
     public HuntManager manager() { return mgr; }
+
+    /** hunt sizemode: sets the mode (saved to the config); the log line is the one of the change. Returns the previous mode. */
+    public String setSizeMode(String word) {
+        String prev = SizeTable.mode(cfg.sizeMode), mode = SizeTable.mode(word);
+        try { HuntConfigSpec.setSizeMode(mode); } catch (RuntimeException ex) { WormsOfArrakis.LOGGER.warn("[WormsOfArrakis] size: could not save the config ({}); the mode is changed for this run only", ex.toString()); }
+        cfg.sizeMode = mode;
+        lastMode = mode;
+        if (!prev.equals(mode)) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] size: mode changed to {} (new events use it; a running event keeps its own)", mode);
+        return prev;
+    }
+
+    /** hunt preview size [players]: what both rules would give at the caller (nothing starts). */
+    java.util.List<String> previewSize(ServerPlayer p, Integer playersGiven) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        PlayerState me = stateNow(p);
+        int depth = depthNow(p);
+        SizeTable.Size byDepth = SizeTable.forDepth(depth, cfg);
+        out.add("current mode: " + SizeTable.mode(cfg.sizeMode) + (SizeTable.mode(cfg.sizeMode).equals("depth") ? " (the depth rule decides)" : " (the players rule decides)"));
+        out.add("depth rule: depth " + depth + " -> " + (byDepth == null ? "too shallow (no event, the score loses " + trim(cfg.shallowPenalty) + ")" : byDepth.label + " W" + trim(byDepth.width)));
+        long t0 = System.nanoTime();
+        Corridor.Terrain terrain = strikes.terrainOf(p.level());
+        OpenDesert.Verdict v = OpenDesert.check(terrain, p.getX(), p.getZ(), null, cfg);
+        double ms = (System.nanoTime() - t0) / 1e6;
+        out.add("open desert: " + v.percentText() + "% of " + v.samples() + " samples are sand (needs " + trim(v.needPercent()) + "%, radius " + cfg.openDesertRadius + " every " + cfg.openDesertSpacing + " blocks, " + v.unloaded() + " in unloaded chunks) -> " + (v.open() ? "OPEN" : "NOT open") + " (" + String.format(java.util.Locale.ROOT, "%.2f", ms) + " ms)");
+        if (!v.open()) {
+            for (OpenDesert.Fail fl : v.firstFails()) {
+                int x = (int) Math.floor(p.getX()) + fl.dx(), z = (int) Math.floor(p.getZ()) + fl.dz();
+                String block = fl.kind() == Corridor.Kind.UNLOADED ? "unloaded chunk" : BuiltInRegistries.BLOCK.getKey(p.level().getBlockState(new net.minecraft.core.BlockPos(x, terrain.top(x, z).y(), z)).getBlock()).toString();
+                out.add("  fails: " + block + " at offset " + fl.dx() + "," + fl.dz() + " (x " + x + " z " + z + ")");
+            }
+        }
+        int n = playersGiven != null ? Math.max(1, playersGiven) : SizeTable.countPlayers(mgr.rosterOf(me, new java.util.ArrayList<>(mgr.lastStatesView().values())));
+        SizeTable.Size byPlayers = SizeTable.forPlayers(n, v.open(), cfg);
+        out.add("players rule: " + n + " player(s)" + (playersGiven != null ? " (given)" : " (the list a trigger here would lock)") + ", " + (v.open() ? "open" : "not open") + " -> " + byPlayers.label + " W" + trim(byPlayers.width) + "   [with " + n + ": open " + SizeTable.forPlayers(n, true, cfg).label + ", not open " + SizeTable.forPlayers(n, false, cfg).label + "]");
+        if (depth <= cfg.depthShallowMax) out.add("note: the sand here is too shallow: in both modes no event starts");
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] size: preview for {}: {}", p.getGameProfile().name(), String.join(" | ", out));
+        return out;
+    }
     public HuntConfig config() { return cfg; }
     public ServerPlayer player(UUID id) { return online.get(id); }
     public long lastParticlesMade() { return lastParticlesMade; }
@@ -182,8 +220,13 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         return h.isPresent() && p.hasEffect(h.get());
     }
 
+    private String lastMode;   // the size mode last seen in the config (the Mods menu screen and the file change it without the command)
+
     private void refreshConfig() {
         HuntConfigSpec.refresh(cfg);
+        String mode = SizeTable.mode(cfg.sizeMode);
+        if (lastMode == null) lastMode = mode;
+        else if (!lastMode.equals(mode)) { lastMode = mode; WormsOfArrakis.LOGGER.info("[WormsOfArrakis] size: mode changed to {} (new events use it; a running event keeps its own)", mode); }
         if (!cfg.sandBlocks.equals(sandKey)) {
             Set<Block> s = new HashSet<>();
             for (String id : cfg.sandBlocks) {
@@ -244,6 +287,13 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
         ServerLevel level = levelOf.get(id);
         int bx = (int) Math.floor(p.getX()), bz = (int) Math.floor(p.getZ());
         return SandProbe.depth(sy, y -> classOf(level, bx, y, bz));
+    }
+
+    @Override
+    public OpenDesert.Verdict openDesert(UUID id, SizeTable.Size size) {
+        ServerPlayer p = online.get(id);
+        if (p == null) return OpenDesert.NOT_READ;
+        return OpenDesert.check(strikes.terrainOf(p.level()), p.getX(), p.getZ(), size, cfg);
     }
 
     /** The depth D under a player right now (for the commands); 0 when not on sand. */
@@ -344,8 +394,9 @@ public final class HuntAdapter implements HuntManager.Env, HuntManager.Listener 
 
     @Override
     public void onStart(HuntEvent e, PlayerState t) {
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {}", e.sizeInfo());
         ServerPlayer p = online.get(t.id());
-        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: event {} started on {}: {} worm W{} ({}), stalk {} s, list {} ({})", e.id, t.name(), e.size.label, trim(e.width), "size factor " + fmt(e.factor), trim(e.stalkSeconds),
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] hunt: event {} started on {} (size mode {}): {} worm W{} ({}), stalk {} s, list {} ({})", e.id, t.name(), e.sizeMode(), e.size.label, trim(e.width), "size factor " + fmt(e.factor), trim(e.stalkSeconds),
                 e.members().size(), names(e.members()));
         if (p == null) return;
         playRoar(p, e.size, e.id * 0x9E3779B97F4A7C15L ^ t.id().getLeastSignificantBits());   // the only thing that plays at the start (prompt 15 part 4): no explosion, no puff

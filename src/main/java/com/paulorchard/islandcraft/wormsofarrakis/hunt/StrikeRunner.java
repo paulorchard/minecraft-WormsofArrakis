@@ -140,7 +140,7 @@ final class StrikeRunner {
 
     // ---- the terrain ----
 
-    private Corridor.Terrain terrainOf(ServerLevel level) {
+    Corridor.Terrain terrainOf(ServerLevel level) {
         return (x, z) -> {
             if (!level.hasChunkAt(new BlockPos(x, level.getMinY(), z))) return new Corridor.Top(Corridor.Kind.UNLOADED, 0);
             int h = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);   // the y of the first free block above the top block
@@ -174,18 +174,19 @@ final class StrikeRunner {
     /** The types that need no availability check for this event: weight 0 for its size, unless forced (prompt 19). */
     private Set<StrikeType> skipFor(HuntEvent e) {
         Forced f = forced.get(e.id);
-        return StrikeChoice.skipSet(a.config(), e.size, f == null ? null : f.type());
+        return StrikeChoice.skipSet(a.config(), e.sizeMode(), e.size, f == null ? null : f.type());
     }
 
     /** hunt preview choice: the availability here and the seeded choice {@code trials} times; nothing is spawned. */
     java.util.List<String> previewChoice(ServerPlayer p, SizeTable.Size size, int trials) {
         a.stateNow(p);
         java.util.List<String> out = new java.util.ArrayList<>();
-        Set<StrikeType> skip = StrikeChoice.skipSet(a.config(), size, null);
+        String mode = SizeTable.mode(a.config().sizeMode);
+        Set<StrikeType> skip = StrikeChoice.skipSet(a.config(), mode, size, null);
         StrikeChoice.Availability av = evaluate(terrainOf(p.level()), p, p.getX(), p.getZ(), groundY(p), size, skip);
         StrikeChoice.Availability full = evaluate(terrainOf(p.level()), p, p.getX(), p.getZ(), groundY(p), size, Set.of());
-        double[] w = a.config().weightsFor(size);
-        StringBuilder b = new StringBuilder("available for " + size.label + " (W" + HuntAdapter.trim(size.width) + "): ");
+        double[] w = a.config().weightsFor(mode, size);
+        StringBuilder b = new StringBuilder("(size mode " + mode + ") available for " + size.label + " (W" + HuntAdapter.trim(size.width) + "): ");
         for (StrikeType t : StrikeType.values()) b.append(t.label).append(av.has(t) ? " yes" : " no").append(" (weight ").append(HuntAdapter.trim(w[t.ordinal()])).append(");  ");
         out.add(b.toString());
         for (StrikeType t : StrikeType.values()) if (!av.has(t)) out.add(t.label + " not available: " + (av.skipped.contains(t) ? "not checked: weight 0 for this size" + (full.has(t) ? " (it would be available here)" : " (it would not be available here: " + full.why(t) + ")") : av.why(t)));
@@ -194,7 +195,7 @@ final class StrikeRunner {
         java.util.Map<String, Integer> count = new java.util.LinkedHashMap<>();
         for (StrikeType t : StrikeType.values()) count.put(t.label, 0);
         for (int i = 0; i < trials; i++) {
-            StrikeChoice.Decision d = StrikeChoice.decide(av, a.config(), size, r, null);
+            StrikeChoice.Decision d = StrikeChoice.decide(av, a.config(), mode, size, r, null);
             String k = d.fallback() ? "fallback " + d.strikeSize().label + " " + d.choice().type().label : d.choice().type().label;
             count.merge(k, 1, Integer::sum);
         }
@@ -290,10 +291,10 @@ final class StrikeRunner {
         for (StrikeType t : new StrikeType[]{StrikeType.CREST, StrikeType.ENGULF}) if (!av.has(t)) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: {} not available: {}", t.label, av.why(t));
         Forced f = forced.remove(e.id);
         if (f != null && !av.has(f.type())) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: forced {} is not available here now ({}); it runs because it was ordered{}", f.type().label, av.why(f.type()), f.force() ? " with force" : " when it was available");
-        StrikeChoice.Decision dec = StrikeChoice.decide(av, a.config(), e.size, rng, f == null ? null : f.type());
+        StrikeChoice.Decision dec = StrikeChoice.decide(av, a.config(), e.sizeMode(), e.size, rng, f == null ? null : f.type());
         StrikeChoice.Choice c = dec.choice();
         SizeTable.Size ss = dec.strikeSize();   // the size of the strike: from here on everything that depends on the strike reads THIS, not the event's size
-        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {}", StrikeChoice.line(e.size, av, a.config(), c));
+        WormsOfArrakis.LOGGER.info("[WormsOfArrakis] {}", StrikeChoice.line(e.size, av, a.config(), e.sizeMode(), c));
         if (dec.fallback()) WormsOfArrakis.LOGGER.info("[WormsOfArrakis] strike: no weighted type available for {} ({}); fallback {} {}", e.size.label, dec.why().isEmpty() ? "none has a weight above 0" : dec.why(), ss.label, c.type().label);
         Plan plan = plan(c.type(), ss);
         double[] o = Alignment.origin(x, z, plan.entryZ(), c.yawDeg());

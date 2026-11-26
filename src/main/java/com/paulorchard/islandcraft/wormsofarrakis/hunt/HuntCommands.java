@@ -60,9 +60,12 @@ public final class HuntCommands {
         h.then(Commands.literal("fake").then(Commands.literal("remove").executes(ctx -> { hunt().removeFakePlayers(); say(ctx, tr("stop.done", 0)); return 1; }))
                 .then(Commands.literal("named").then(Commands.argument("name", StringArgumentType.word()).then(Commands.argument("x", DoubleArgumentType.doubleArg(-30000000, 30000000)).then(Commands.argument("y", DoubleArgumentType.doubleArg(-64, 4000)).then(Commands.argument("z", DoubleArgumentType.doubleArg(-30000000, 30000000))
                         .executes(ctx -> fakeNamed(ctx, StringArgumentType.getString(ctx, "name"), DoubleArgumentType.getDouble(ctx, "x"), DoubleArgumentType.getDouble(ctx, "y"), DoubleArgumentType.getDouble(ctx, "z"))))))))
-                .then(Commands.literal("trigger").then(sizeBranchFake()))
+                .then(Commands.literal("trigger").executes(ctx -> trigger(ctx, fakeOrFail(), null, null, false)).then(sizeBranchFake()))
+                .then(Commands.literal("size").executes(ctx -> previewSizeOf(ctx, fakeOrFail(), null)).then(Commands.argument("players", IntegerArgumentType.integer(-1000, 100000)).executes(ctx -> previewSizeOf(ctx, fakeOrFail(), IntegerArgumentType.getInteger(ctx, "players")))))
                 .then(Commands.argument("x", DoubleArgumentType.doubleArg(-30000000, 30000000)).then(Commands.argument("y", DoubleArgumentType.doubleArg(-64, 4000)).then(Commands.argument("z", DoubleArgumentType.doubleArg(-30000000, 30000000))
                         .executes(ctx -> fake(ctx, DoubleArgumentType.getDouble(ctx, "x"), DoubleArgumentType.getDouble(ctx, "y"), DoubleArgumentType.getDouble(ctx, "z")))))));
+        h.then(Commands.literal("sizemode").executes(ctx -> sizeMode(ctx, null))
+                .then(Commands.argument("mode", StringArgumentType.word()).suggests((c, b) -> SharedSuggestionProvider.suggest(List.of("depth", "players"), b)).executes(ctx -> sizeMode(ctx, StringArgumentType.getString(ctx, "mode")))));
         h.then(Commands.literal("stop").executes(ctx -> stop(ctx, null))
                 .then(Commands.argument("player", EntityArgument.player()).executes(ctx -> stop(ctx, EntityArgument.getPlayer(ctx, "player")))));
         h.then(Commands.literal("ignore").then(Commands.argument("player", EntityArgument.player()).executes(ctx -> ignore(ctx, EntityArgument.getPlayer(ctx, "player")))));
@@ -70,6 +73,8 @@ public final class HuntCommands {
                 .then(Commands.argument("size", StringArgumentType.word()).suggests((c, b) -> SharedSuggestionProvider.suggest(List.of("small", "medium", "large", "huge", "8", "16", "32", "48"), b))
                         .executes(ctx -> previewAttack(ctx, StringArgumentType.getString(ctx, "size"), 8))
                         .then(Commands.argument("seconds", DoubleArgumentType.doubleArg(-1000, 100000)).executes(ctx -> previewAttack(ctx, StringArgumentType.getString(ctx, "size"), DoubleArgumentType.getDouble(ctx, "seconds"))))))
+                .then(Commands.literal("size").executes(ctx -> previewSize(ctx, null))
+                .then(Commands.argument("players", IntegerArgumentType.integer(-1000, 100000)).executes(ctx -> previewSize(ctx, IntegerArgumentType.getInteger(ctx, "players")))))
                 .then(Commands.literal("choice").executes(ctx -> previewChoice(ctx, "medium", 1000))
                 .then(Commands.argument("size", StringArgumentType.word()).suggests((c, b) -> SharedSuggestionProvider.suggest(SIZES, b))
                         .executes(ctx -> previewChoice(ctx, StringArgumentType.getString(ctx, "size"), 1000))
@@ -99,6 +104,18 @@ public final class HuntCommands {
     private static int fakeNamed(CommandContext<CommandSourceStack> ctx, String name, double x, double y, double z) {
         ServerPlayer p = hunt().fakePlayer(ctx.getSource().getLevel(), name, x, y, z);
         say(ctx, Component.literal("Fake player " + p.getGameProfile().name() + " stands at " + HuntAdapter.fmt(x) + " " + HuntAdapter.fmt(y) + " " + HuntAdapter.fmt(z) + " (test only)"));
+        return 1;
+    }
+
+    /** The fake player of the smoke tests (hunt fake ...): the size rules can be run on it as on a real caller. */
+    private static ServerPlayer fakeOrFail() throws CommandSyntaxException {
+        ServerPlayer p = hunt().fakePlayerOrNull();
+        if (p == null) throw new com.mojang.brigadier.exceptions.SimpleCommandExceptionType(Component.literal("no fake player: hunt fake <x> <y> <z> first")).create();
+        return p;
+    }
+
+    private static int previewSizeOf(CommandContext<CommandSourceStack> ctx, ServerPlayer p, Integer players) {
+        for (String l : hunt().previewSize(p, players)) say(ctx, Component.literal("hunt preview size: " + l));
         return 1;
     }
 
@@ -132,6 +149,7 @@ public final class HuntCommands {
         if (events.isEmpty()) say(ctx, tr("status.none"));
         for (HuntEvent e : events) {
             say(ctx, tr("status.event", e.id, e.size.label, HuntAdapter.trim(e.width), e.phase().name(), HuntAdapter.fmt(e.secondsLeft()), e.members().size()));
+            say(ctx, Component.literal("  size mode: " + e.sizeMode() + " (" + e.sizeInfo().replaceFirst("^size: ", "") + ")"));
             if (!e.strikeType().isEmpty()) say(ctx, Component.literal("  size=" + e.size.label + " strike=" + (e.strikeSize() != e.size ? e.strikeSize().label + " " : "") + e.strikeType() + (e.strikeFallback() ? " (fallback)" : "")));
             for (UUID u : e.members()) {
                 PlayerState s = a.manager().lastState(u);
@@ -267,6 +285,25 @@ public final class HuntCommands {
         AttackRumble.Plan plan = a.previewAttackRumble(p, size, sec);
         say(ctx, Component.literal(String.format(Locale.ROOT, "hunt preview attackrumble: %s W%s: radius %.1f blocks, columns move up to %d/16, strength %.2f rising to 1.00 over %.1f s then 1.00, for %.1f s in all, then it stops (the tremor sound and sand particles repeat while it runs)",
                 size.label, HuntAdapter.trim(size.width), plan.radius(), plan.maxSixteenths(), plan.start(), plan.freezeSeconds(), sec)));
+        return 1;
+    }
+
+    /** hunt sizemode [depth|players]: shows or sets the size mode (saved to the config). */
+    private static int sizeMode(CommandContext<CommandSourceStack> ctx, String word) {
+        HuntAdapter a = hunt();
+        if (word == null) { say(ctx, Component.literal("hunt sizemode: the size mode is " + SizeTable.mode(a.config().sizeMode) + " (depth: by the depth of the sand; players: by the number of players and open desert). A running event keeps its own.")); return 1; }
+        String w = word.toLowerCase(Locale.ROOT);
+        if (!w.equals("depth") && !w.equals("players")) return fail(ctx, Component.literal("hunt sizemode: '" + word + "' is not depth or players"));
+        String prev = a.setSizeMode(w);
+        say(ctx, Component.literal("hunt sizemode: the size mode is now " + w + (prev.equals(w) ? " (it was already)" : " (was " + prev + ")") + ", saved to the config; new events use it, a running event keeps its own"));
+        return 1;
+    }
+
+    /** hunt preview size [players]: what both rules would give at the caller (prompt 20). */
+    private static int previewSize(CommandContext<CommandSourceStack> ctx, Integer players) throws CommandSyntaxException {
+        ServerPlayer p = ctx.getSource().getPlayerOrException();
+        if (players != null && players < 1) say(ctx, Component.literal("hunt preview size: " + players + " players is below 1: 1 used"));
+        for (String l : hunt().previewSize(p, players)) say(ctx, Component.literal("hunt preview size: " + l));
         return 1;
     }
 

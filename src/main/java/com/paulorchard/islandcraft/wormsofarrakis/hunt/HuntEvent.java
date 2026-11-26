@@ -58,6 +58,7 @@ public final class HuntEvent {
     private boolean strikeDone, devoured;
     private double strikeLimit = Double.MAX_VALUE;
     private String strikeType = "", strikeDir = "";
+    private String sizeMode = "depth", sizeInfo = "";   // the size mode the event started with (it keeps it) and the log line of the decision
     private SizeTable.Size strikeSize;   // the size of the worm that strikes (prompt 19): the event's size, or the fallback size
     private boolean strikeFallback;
 
@@ -102,6 +103,9 @@ public final class HuntEvent {
     /** The longest the event waits for the strike, in seconds from the start of STRIKE (a safety net; the move's own end normally comes first). */
     public void setStrikeLimit(double seconds) { strikeLimit = seconds; }
     public void setStrikeInfo(String type, String dir) { strikeType = type; strikeDir = dir; }
+    public void setSizeMode(String mode, String info) { sizeMode = mode; sizeInfo = info; }
+    public String sizeMode() { return sizeMode; }
+    public String sizeInfo() { return sizeInfo; }
     public void setStrikeSize(SizeTable.Size size, boolean fallback) { strikeSize = size; strikeFallback = fallback; }
     /** The size of the strike (after the choice); the event's own size before it. */
     public SizeTable.Size strikeSize() { return strikeSize == null ? size : strikeSize; }

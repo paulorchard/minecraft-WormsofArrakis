@@ -99,6 +99,25 @@ public final class HuntConfig {
     public String[] fallbackSize = {"small", "medium", "large", "medium"};
     public String[] fallbackType = {"crash", "crash", "crash", "crash"};
 
+    /** Prompt 20: the size rule. */
+    public String sizeMode = "depth";
+    public double openDesertPercent = 98;
+    public int openDesertRadius = 48, openDesertSpacing = 4;
+    public int playersLargeAt = 2, playersHugeAt = 6;
+    /** Players mode sizes by tier [single, group, crowd]. */
+    public String[] playersSizeOpen = {"medium", "large", "huge"};
+    public String[] playersSizeClosed = {"small", "medium", "medium"};
+    /** The weights of players mode [small, medium, large, huge][crest, crash, emerge, engulf]. */
+    public static final double[][] DEFAULT_PLAYERS_WEIGHTS = {{70, 5, 5, 20}, {70, 5, 5, 20}, {70, 5, 5, 20}, {0, 0, 0, 100}};
+    public double[][] playersWeights = {DEFAULT_PLAYERS_WEIGHTS[0].clone(), DEFAULT_PLAYERS_WEIGHTS[1].clone(), DEFAULT_PLAYERS_WEIGHTS[2].clone(), DEFAULT_PLAYERS_WEIGHTS[3].clone()};
+
+    /** The effective weights of a size in a mode (depth: StrikeWeights.<size>, the values of prompt 19; players: size.PlayersMode.StrikeWeights.<size>); a bad row gives the default row of that mode. */
+    public double[] weightsFor(String mode, SizeTable.Size size) {
+        if (!SizeTable.PLAYERS.equals(SizeTable.mode(mode))) return weightsFor(size);
+        double[] w = playersWeights[size.ordinal()];
+        return badRow(w) ? DEFAULT_PLAYERS_WEIGHTS[size.ordinal()].clone() : w.clone();
+    }
+
     private static boolean badRow(double[] w) {
         double sum = 0;
         for (double v : w) { if (v < 0) return true; sum += v; }
@@ -114,6 +133,11 @@ public final class HuntConfig {
     /** One line for every bad weight table or fallback key: what was wrong and what is used instead (logged at start-up). */
     public java.util.List<String> weightProblems() {
         java.util.List<String> l = new java.util.ArrayList<>();
+        for (SizeTable.Size s : SizeTable.Size.values()) {
+            if (badRow(playersWeights[s.ordinal()])) l.add("size.PlayersMode.StrikeWeights." + s.label + " " + java.util.Arrays.toString(playersWeights[s.ordinal()]) + " is refused (a negative number or a sum of 0): the default " + java.util.Arrays.toString(DEFAULT_PLAYERS_WEIGHTS[s.ordinal()]) + " is used");
+        }
+        for (String w : playersSizeOpen) if (SizeTable.Size.of(w.trim().toLowerCase(java.util.Locale.ROOT)) == null) l.add("size.PlayersMode.Open '" + w + "' is not small, medium, large or huge: the default of that row is used");
+        for (String w : playersSizeClosed) if (SizeTable.Size.of(w.trim().toLowerCase(java.util.Locale.ROOT)) == null) l.add("size.PlayersMode.Closed '" + w + "' is not small, medium, large or huge: the default of that row is used");
         for (SizeTable.Size s : SizeTable.Size.values()) {
             if (badRow(strikeWeightsBySize[s.ordinal()])) l.add("StrikeWeights." + s.label + " " + java.util.Arrays.toString(strikeWeightsBySize[s.ordinal()]) + " is refused (a negative number or a sum of 0): the default " + java.util.Arrays.toString(DEFAULT_WEIGHTS[s.ordinal()]) + " is used");
             if (SizeTable.Size.of(fallbackSize[s.ordinal()].toLowerCase(java.util.Locale.ROOT)) == null) l.add("FallbackSize." + s.label + " '" + fallbackSize[s.ordinal()] + "' is not small, medium, large or huge: the default " + fallbackSizeFor(s).label + " is used");
@@ -162,6 +186,8 @@ public final class HuntConfig {
         l.add("TremorParticleBudgetPerTick=" + tremorParticleBudgetPerTick + "");
         l.add("TremorParticles=" + tremorParticles + " TremorSoundVolume=" + tremorSoundVolume);
         for (SizeTable.Size s : SizeTable.Size.values()) l.add("StrikeWeights." + s.label + " crest=" + weightsFor(s)[0] + " crash=" + weightsFor(s)[1] + " emerge=" + weightsFor(s)[2] + " engulf=" + weightsFor(s)[3] + " FallbackSize=" + fallbackSizeFor(s).label + " FallbackType=" + fallbackTypeFor(s).label);
+        for (SizeTable.Size s : SizeTable.Size.values()) l.add("size.PlayersMode.StrikeWeights." + s.label + " crest=" + weightsFor("players", s)[0] + " crash=" + weightsFor("players", s)[1] + " emerge=" + weightsFor("players", s)[2] + " engulf=" + weightsFor("players", s)[3]);
+        l.add("SizeMode=" + SizeTable.mode(sizeMode) + " (depth: DepthSmallMax " + depthSmallMax + ", DepthMediumMax " + depthMediumMax + ", DepthLargeMax " + depthLargeMax + "; players: open desert " + openDesertPercent + "% of the samples within " + openDesertRadius + " blocks every " + openDesertSpacing + " blocks, PlayersLargeAt " + playersLargeAt + ", PlayersHugeAt " + playersHugeAt + ", open " + java.util.Arrays.toString(playersSizeOpen) + ", not open " + java.util.Arrays.toString(playersSizeClosed) + ")");
         l.add("StrikeYawMode=" + strikeYawMode + " ScanColumnsPerTick=" + scanColumnsPerTick);
         l.add("CrestAhead=" + java.util.Arrays.toString(crestAhead) + " CrestBehind=" + java.util.Arrays.toString(crestBehind) + " CrestTolerance=" + java.util.Arrays.toString(crestTolerance) + " (small, medium, large, huge)");
         String[] mv = {"crest", "crash", "emerge", "engulf"}, sz = {"small", "medium", "large", "huge"};

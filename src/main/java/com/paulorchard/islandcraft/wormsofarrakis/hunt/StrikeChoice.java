@@ -56,9 +56,12 @@ public final class StrikeChoice {
     }
 
     /** The types with weight 0 for the size, except the forced one: their availability is not read at all (prompt 19). */
-    public static Set<StrikeType> skipSet(HuntConfig cfg, SizeTable.Size size, StrikeType forced) {
+    public static Set<StrikeType> skipSet(HuntConfig cfg, SizeTable.Size size, StrikeType forced) { return skipSet(cfg, SizeTable.DEPTH, size, forced); }
+
+    /** As above for the weights of a size mode (prompt 20). */
+    public static Set<StrikeType> skipSet(HuntConfig cfg, String mode, SizeTable.Size size, StrikeType forced) {
         Set<StrikeType> s = EnumSet.noneOf(StrikeType.class);
-        double[] w = cfg.weightsFor(size);
+        double[] w = cfg.weightsFor(mode, size);
         for (StrikeType t : StrikeType.values()) if (w[t.ordinal()] <= 0 && t != forced && (t == StrikeType.CREST || t == StrikeType.ENGULF)) s.add(t);   // crash and emerge cost no column reads
         return s;
     }
@@ -122,8 +125,11 @@ public final class StrikeChoice {
      */
     public record Decision(Choice choice, SizeTable.Size strikeSize, boolean fallback, String why) {}
 
-    public static Decision decide(Availability a, HuntConfig cfg, SizeTable.Size size, Random rng, StrikeType forced) {
-        double[] w = cfg.weightsFor(size);
+    public static Decision decide(Availability a, HuntConfig cfg, SizeTable.Size size, Random rng, StrikeType forced) { return decide(a, cfg, SizeTable.DEPTH, size, rng, forced); }
+
+    /** As above with the weights of a size mode: depth or players (prompt 20); the event keeps the mode it started with. */
+    public static Decision decide(Availability a, HuntConfig cfg, String mode, SizeTable.Size size, Random rng, StrikeType forced) {
+        double[] w = cfg.weightsFor(mode, size);
         SizeTable.Size strikeSize = size;
         StrikeType t;
         boolean fb = false;
@@ -155,6 +161,8 @@ public final class StrikeChoice {
 
     /** The log line of one choice: {@code strike: size=<name> W<n> available=[...] weights=[...] chosen=<type> dir=<N|E|S|W|->}. */
     public static String line(SizeTable.Size size, Availability a, HuntConfig cfg, Choice c) { return line(size, a, cfg.weightsFor(size), c); }
+
+    public static String line(SizeTable.Size size, Availability a, HuntConfig cfg, String mode, Choice c) { return line(size, a, cfg.weightsFor(mode, size), c); }
 
     public static String line(SizeTable.Size size, Availability a, double[] weights, Choice c) {
         StringBuilder av = new StringBuilder(), w = new StringBuilder();

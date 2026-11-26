@@ -22,6 +22,8 @@ public final class HuntManager {
     public interface Env {
         List<PlayerState> players();
         int depth(UUID id);
+        /** Players mode: is the desert open round this player (the size is not known yet at the trigger: null). The default reads no terrain and says open. */
+        default OpenDesert.Verdict openDesert(UUID id, SizeTable.Size size) { return OpenDesert.NOT_READ; }
     }
 
     /** What the game adapter does when something happens. */
@@ -59,6 +61,7 @@ public final class HuntManager {
     public boolean inEvent(UUID id) { return byPlayer.containsKey(id); }
     public long tickNo() { return tickNo; }
     public PlayerState lastState(UUID id) { return lastStates.get(id); }
+    public Map<UUID, PlayerState> lastStatesView() { return lastStates; }
 
     public boolean toggleIgnore(UUID id) { if (ignored.remove(id)) return false; ignored.add(id); return true; }
     public boolean ignored(UUID id) { return ignored.contains(id); }
@@ -95,8 +98,7 @@ public final class HuntManager {
         for (PlayerState s : cands) {
             if (byPlayer.containsKey(s.id())) continue;   // placed in an earlier event's list this tick
             int d = env.depth(s.id());
-            SizeTable.Size size = SizeTable.forDepth(d, cfg);
-            if (size == null) {
+            if (SizeTable.forDepth(d, cfg) == null) {   // the shallow safety, in both modes
                 double ns = Math.max(0, aggro.getAggro(s.id()) - cfg.shallowPenalty);
                 aggro.setAggro(s.id(), ns);
                 Long at = shallowLoggedAt.get(s.id());
@@ -106,7 +108,7 @@ public final class HuntManager {
                 }
                 continue;
             }
-            start(s, size, players);
+            start(s, null, players, env, d);
         }
 
         // 4. the events
@@ -121,12 +123,29 @@ public final class HuntManager {
 
     // ---- starting ----
 
-    /** Locks the roster and starts the event (the caller has checked the trigger). */
-    private HuntEvent start(PlayerState trigger, SizeTable.Size size, List<PlayerState> players) {
+    /** The event list a trigger by this player would lock now (the same scan as the start; the preview command uses it too). */
+    public List<UUID> rosterOf(PlayerState trigger, List<PlayerState> players) {
         List<ListScan.Candidate> cs = new ArrayList<>();
         for (PlayerState p : players) cs.add(new ListScan.Candidate(p.id(), p.dim(), p.x(), p.z(), p.onSand(), byPlayer.containsKey(p.id()), p.eligible()));
         ListScan.Candidate t = new ListScan.Candidate(trigger.id(), trigger.dim(), trigger.x(), trigger.z(), true, false, true);
-        List<UUID> roster = ListScan.scan(t, cs, cfg.groupRadius);
+        return ListScan.scan(t, cs, cfg.groupRadius);
+    }
+
+    /** Locks the roster and starts the event (the caller has checked the trigger). */
+    private HuntEvent start(PlayerState trigger, SizeTable.Size forced, List<PlayerState> players, Env env, int depth) {
+        List<UUID> roster = rosterOf(trigger, players);
+        // the size: decided once, after the roster is locked (the stalk depends on it); the mode is the one in force now and the event keeps it
+        String mode = SizeTable.mode(cfg.sizeMode);
+        SizeTable.Size size;
+        String sizeLine;
+        if (forced != null) { size = forced; sizeLine = "size: mode=" + mode + " forced by the command -> " + forced.label + " W" + (long) forced.width; }
+        else {
+            long t0 = System.nanoTime();
+            OpenDesert.Verdict v = SizeTable.PLAYERS.equals(mode) ? env.openDesert(trigger.id(), null) : null;
+            SizeTable.Decision dec = SizeTable.decide(mode, depth, SizeTable.countPlayers(roster), v, cfg);
+            size = dec.size();
+            sizeLine = dec.line() + (v == null ? "" : String.format(java.util.Locale.ROOT, " (%d columns read, %.2f ms)", v.samples(), (System.nanoTime() - t0) / 1e6));
+        }
         HuntEvent[] holder = new HuntEvent[1];
         HuntEvent.Hooks bridge = new HuntEvent.Hooks() {
             @Override public void onPhaseChange(HuntEvent e, HuntEvent.Phase from, HuntEvent.Phase to) { listener.onPhaseChange(e, from, to); }
@@ -138,6 +157,7 @@ public final class HuntManager {
         };
         HuntEvent e = new HuntEvent(nextId++, trigger.id(), trigger.dim(), size, roster, cfg, bridge, (ev, v, w, s) -> strike.onAttack(ev, v, w, s));
         holder[0] = e;
+        e.setSizeMode(mode, sizeLine);
         events.put(e.id, e);
         for (UUID u : roster) {
             byPlayer.put(u, e);
@@ -154,13 +174,10 @@ public final class HuntManager {
         if (byPlayer.containsKey(id)) return TriggerResult.IN_EVENT;
         if (!s.eligible()) return TriggerResult.NOT_ELIGIBLE;
         if (!s.onSand() && size == null) return TriggerResult.NOT_ON_SAND;
-        SizeTable.Size use = size;
-        if (use == null) {
-            use = SizeTable.forDepth(env.depth(id), cfg);
-            if (use == null) return TriggerResult.SHALLOW;
-        }
+        int depth = env.depth(id);
+        if (size == null && SizeTable.forDepth(depth, cfg) == null) return TriggerResult.SHALLOW;
         List<PlayerState> all = new ArrayList<>(lastStates.values());
-        start(s, use, all);
+        start(s, size, all, env, depth);
         return TriggerResult.STARTED;
     }
 
